@@ -1,4 +1,4 @@
-package App::curo_sync; our $VERSION = '0.01_01';
+package App::curo_sync; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use Carp qw/confess/;

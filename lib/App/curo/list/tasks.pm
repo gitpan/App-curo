@@ -1,4 +1,4 @@
-package App::curo::list::tasks; our $VERSION = '0.01_01';
+package App::curo::list::tasks; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use App::curo::Util;
@@ -50,10 +50,6 @@ App::curo::list::tasks - List project tasks
 =head1 DESCRIPTION
 
 See L<curo>(1) for details.
-
-=head1 SEE ALSO
-
-L<DDB>(3p), L<curo>(1)
 
 =head1 AUTHOR
 

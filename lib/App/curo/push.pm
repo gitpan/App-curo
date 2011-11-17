@@ -1,4 +1,4 @@
-package App::curo::push; our $VERSION = '0.01_01';
+package App::curo::push; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use App::curo::Util;
@@ -97,10 +97,6 @@ App::curo::push - Send updates to a hub
 
 See L<curo>(1) for details.
 
-=head1 SEE ALSO
-
-L<App::curo>(3p), L<curo>(1)
-=head1 AUTHOR
 
 Mark Lawrence E<lt>nomad@null.netE<gt>
 

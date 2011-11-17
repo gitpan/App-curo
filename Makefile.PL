@@ -5,7 +5,7 @@ abstract 'Distributed Project Management Database';
 author 'Mark Lawrence <nomad@null.net>';
 license 'gpl3';
 perl_version '5.006';
-version '0.01_01';
+version '0.01_02';
 
 requires 'AnyEvent'                  => 0;
 requires 'AnyEvent::Handle'          => 0;
@@ -19,7 +19,7 @@ requires 'Getopt::Long::Descriptive' => 0;
 requires 'JSON::XS'                  => 0;
 requires 'Log::Any'                  => 0;
 requires 'Moo'                       => 0;
-requires 'SQL::DB'                   => '0.19_10';
+requires 'SQL::DB'                   => '0.19_11';
 requires 'SQL::DBx::Deploy'          => 0;
 requires 'SQL::DBx::Sequence'        => 0;
 requires 'SQL::DBx::Simple'          => 0;

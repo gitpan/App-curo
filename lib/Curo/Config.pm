@@ -127,7 +127,7 @@ __END__
 
 =head1 NAME
 
-Config::Tiny - Read/Write .ini style files with as little code as
+Curo::Config - Read/Write .ini style files with as little code as
 possible
 
 =head1 SYNOPSIS

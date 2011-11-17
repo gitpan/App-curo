@@ -1,4 +1,4 @@
-package App::curo::upgrade; our $VERSION = '0.01_01';
+package App::curo::upgrade; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use File::Spec::Functions qw/rel2abs catdir/;
@@ -70,10 +70,6 @@ App::curo::upgrade - Upgrade existing database or hub
 =head1 DESCRIPTION
 
 See L<curo>(1) for details.
-
-=head1 SEE ALSO
-
-L<App::curo>(3p), L<curo>(1)
 
 =head1 AUTHOR
 

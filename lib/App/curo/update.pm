@@ -1,4 +1,4 @@
-package App::curo::update; our $VERSION = '0.01_01';
+package App::curo::update; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use App::curo::Util;
@@ -47,11 +47,7 @@ App::curo::update - Comment or modify something
 
 =head1 DESCRIPTION
 
-See L<ddb>(1) for details.
-
-=head1 SEE ALSO
-
-L<DDB::Cmd>(3p), L<ddb>(1)
+See L<curo>(1) for details.
 
 =head1 AUTHOR
 

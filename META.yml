@@ -35,7 +35,7 @@ requires:
   JSON::XS: 0
   Log::Any: 0
   Moo: 0
-  SQL::DB: 0.19_10
+  SQL::DB: 0.19_11
   SQL::DBx::Deploy: 0
   SQL::DBx::Sequence: 0
   SQL::DBx::Simple: 0
@@ -50,4 +50,4 @@ requires:
 resources:
   license: http://opensource.org/licenses/gpl-3.0.html
   repository: git://github.com/mlawren/curo.git
-version: 0.01_01
+version: 0.01_02

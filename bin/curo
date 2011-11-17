@@ -17,7 +17,7 @@ Alpha - still under heavy development.
 
 =head1 SYNOPSIS
 
-  curo COMMAND [ARGS]
+  curo COMMAND [...]
 
 =head1 DESCRIPTION
 

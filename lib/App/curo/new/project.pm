@@ -1,4 +1,4 @@
-package App::curo::new::project; our $VERSION = '0.01_01';
+package App::curo::new::project; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use App::curo::Util;
@@ -69,11 +69,7 @@ App::curo::new::project - insert a new project into the database
 
 =head1 DESCRIPTION
 
-See L<dpt>(1) for details.
-
-=head1 SEE ALSO
-
-L<DDB>(3p), L<dpt>(1)
+See L<curo>(1) for details.
 
 =head1 AUTHOR
 

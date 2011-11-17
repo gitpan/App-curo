@@ -1,3 +1,20 @@
+0.01_02 (Released 2011-12-18)
+
+    Development Release.
+
+    API Changes:
+        - N/A
+
+    New Features:
+        - N/A
+
+    Enhancements:
+        - POD updates.
+        - Depends on SQL::DB 0.19_11.
+
+    Bug Fixes:
+        - N/A
+
 0.01_01 (Released 2011-12-17)
 
     Initial Development Release.

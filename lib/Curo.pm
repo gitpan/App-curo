@@ -1,4 +1,4 @@
-package Curo; our $VERSION = '0.01_01';
+package Curo; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use Moo;

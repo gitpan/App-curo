@@ -1,4 +1,4 @@
-package App::curo::init; our $VERSION = '0.01_01';
+package App::curo::init; our $VERSION = '0.01_02';
 use strict;
 use warnings;
 use File::Spec::Functions qw/rel2abs catdir catfile/;
@@ -81,10 +81,6 @@ App::curo::init - Setup a new database or hub
 =head1 DESCRIPTION
 
 See L<curo>(1) for details.
-
-=head1 SEE ALSO
-
-L<App::curo>(3p), L<curo>(1)
 
 =head1 AUTHOR
 
