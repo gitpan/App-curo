@@ -1,0 +1,417 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use App::curo::Dispatcher;
+App::curo::Dispatcher->run;
+
+__END__
+
+
+=head1 NAME
+
+curo - distributed project management database
+
+=head1 VERSION
+
+Alpha - still under heavy development.
+
+=head1 SYNOPSIS
+
+  curo COMMAND [ARGS]
+
+=head1 DESCRIPTION
+
+Curo is a scalable, distributed project management system designed to
+perform independent of location or connectivity status. Don't let that
+scare you away though; Curo has also been designed to be simple to use
+and works just as well for standalone projects.
+
+Every Curo database is a fully-functional repository of state and
+history, easily modified without needing access to a central server.
+The databse schema allows for the creation and efficient querying of
+tasks, issues, and nested (hierarchical) projects.
+
+The system is truly distributed in the sense that status updates and
+comments are tracked globally. Tasks and issues can be synchronized
+across projects hosted on different repositories. Entire projects can
+be pushed or pulled as sub-elements of other projects. These key
+features, when used widely, allow individuals to focus on their own
+view of projects' activities and to combine them together in unique
+ways.
+
+=for junk
+See L<curo-tutorial>(7) for an in-depth introduction to Curo.
+
+=head1 DEFINITIONS
+
+=over 4
+
+=item Project
+
+A collection of tasks and issues, and possibly sub-projects. Has a
+name, title, phase and a history. Is always specified by its path which
+includes the names of all parent projects concatenated together with
+'/'. A project can exist across multiple repositories.
+
+=item Task
+
+An item of work to be performed. Has an ID, UUID, title, status and a
+history. A task can exist in multiple projects across multiple
+repositories.
+
+=item Issue
+
+A problem that may prevent project completion. Has an ID, UUID, title,
+status and a history. An issue can exist in multiple projects across
+multiple repositories.
+
+=item Hub
+
+A remote synchronization point around which you can share projects,
+tasks, or issues.  Is specified either by its location or by an alias
+created with the 'new hub' command.
+
+=item ID
+
+A locally-unique integer identifying a task or issue.
+
+=item UUID
+
+A globally-unique SHA1 hash identifying a task or issue.
+
+=back
+
+=head1 COMMANDS
+
+Curo commands are based on the initialize, modify, display and
+propagate ideas that users of distributed version control systems
+should find familiar. The command map summary for everyday use is shown
+below. Commands that propagate data are marked with a [*].  Everything
+else performs only local actions.
+
+=for junk
+        clone [*]
+        pull [*]
+
+    init            Setup a new database or hub
+    new             Create something new
+    list            List project tasks and issues
+    log             Review update history
+    update          Comment or modify something
+    push [*]        Send updates to a hub
+    status          Show project status
+    upgrade         Upgrade existing database or hub
+
+
+Curo accepts input on C<stdin>. Normal output is printed to C<stdout>,
+or paged with C<less> or C<more> if C<stdout> is connected to a
+terminal.  Error messages go to C<stderr>.  A exit value of zero
+indicates success.
+
+Running Curo with no command produces a usage message.  Arguments and
+options not supplied on the command line are prompted for.  Adding C<-d
+all> to the end of any command adds debugging information to C<stdout>.
+An editor based on the EDITOR or VISUAL environment variables may be
+invoked for some commands.
+
+=head2 Initialization
+
+=over 4
+
+=item init [--hub] [DIRECTORY]
+
+Create an empty Curo repository. The repository is created inside a
+hidden C<.curo> sub-directory unless C<--hub> is given.
+
+=for junk
+=item clone LOCATION[:REMOTE_PROJECT] [DIRECTORY]
+Clone a repository into the current directory or DIRECTORY.
+The clone can be restricted to a particular REMOTE_PROJECT.
+The clone command is a convenient way to start off a new repository if
+you are looking to mirror all or some part of a remote hub.  If no
+remote project is given then any future pull automatically grabs and
+tracks new projects as they appear in the hub.
+
+=back
+
+=head2 Creation
+
+=over 4
+
+=item new hub [ALIAS] [LOCATION]
+
+Create an alias for a remote Curo hub. The hub LOCATION must be one of
+the following:
+
+=over 4
+
+=item * A local filesystem directory name
+
+=for comment
+=item * A URI of the form curo://host.name/path/
+=item * A URI of the form ssh://[user@]host.name/path/
+
+=back
+
+=item new issue [PROJECT] [TITLE] [-s STATUS] [-c COMMENT]
+
+Create a new issue.
+
+=item new task [PROJECT] [TITLE] [-s STATUS] [-c COMMENT]
+
+Create a new task.
+
+=item new project [[PARENT/]NAME] [TITLE] [-p PHASE] [-c COMMENT]
+
+Create a new project. An optional PARENT may be prepended to the name
+to create the project as a sub-project of an existing project.
+
+=back
+
+=head2 Retrieval
+
+=over 4
+
+=item list
+
+List all projects, issues and tasks combined together in a single
+table.
+
+=item list hubs
+
+List references to remote databases showing name/alias and URI, ordered
+by name.
+
+=item list issues
+
+List issues in the database showing issue ID, title, project, and
+status. Issues are ordered by project path, then by ID.
+
+=item list tasks
+
+List tasks in the database showing issue ID, title, project, and
+status. Tasks are ordered by project path, then by ID.
+
+=item log
+
+Display a summary of the combined history of all activities in the
+repository.
+
+=item log ID
+
+Display the history of the task or issue identified by ID.  Output is
+paged with C<less> or C<more>.
+
+=item log PROJECT
+
+Display the history of PROJECT.
+
+=item status
+
+Display a summary of the database. Lists each project showing the
+title, phase, task count and issue count.
+
+=back
+
+=head2 Modification
+
+=over 4
+
+=item update ID [-s STATUS]
+
+Add a comment and/or modify the status of the task or issue identified
+by ID.
+
+=item update PROJECT [-p PHASE]
+
+Add a comment and/or modify the phase of the project identified by
+PROJECT.
+
+=back
+
+=head2 Propagation
+
+=over 4
+
+=item push PROJECT HUB[:REMOTE_PROJECT] [--no-track]
+
+Send changes from a local project (including its task and issue
+updates) to a remote project. REMOTE_PROJECT defaults to PROJECT. HUB
+is either a location or a previously created hub name.
+
+A project can be re-parented during a push, but the name must remain
+the same.
+
+=for comment
+=item push ID HUB:REMOTE_PROJECT [--no-track]
+Send updates from the local task or issue with ID to a remote project.
+HUB is either a location or a previously created hub name.
+
+=for comment
+=item push
+Send updates from local tasks, issues or projects to hubs that have
+previously been pushed to or pulled from (except where the --no-track
+option was used).  [NOT IMPLEMENTED]
+=item pull HUB:UUID PROJECT [--no-track]
+Incorporate changes from the remote task or issue with a global UUID
+into a local project. HUB is either a location or a previously created
+hub name.
+=item pull HUB:REMOTE_PROJECT [PROJECT] [--no-track]
+Incorporate changes from a remote project (including its task and issue
+updates) into a local project. PROJECT defaults to REMOTE_PROJECT.  HUB
+is either a location or a previously created hub.
+A project can be re-parented during a pull but the name must remain the
+same.
+=item pull
+Incorporate changes from hubs that have previously been pushed to or
+pulled from (except where the --no-track option was used). [NOT
+IMPLEMENTED]
+
+=back
+
+=head2 Administration
+
+=over 4
+
+=item upgrade
+
+Upgrade the database schema to match the current version of the
+software.
+
+=back
+
+=head1 EXAMPLES
+
+=head2 Stand-alone Project
+
+    $ curo init
+    $ curo new project garden
+    New project: 1 (garden) <d323c322-da75-11e0-8cfa-fbf8100e3f89>
+    $ curo new task garden Turn the dirt over
+    New task: 2 <d323c322-da75-11e0-8cfa-fbf8100e3f89>
+    $ curo status
+    ...
+    $ curo log 2
+    ...
+
+=head2 Project Manager
+
+On the machine (teamhost.example.com) that hosts your Curo HUB:
+
+    teamhost$ curo init --hub
+
+Then on your local machine:
+
+    $ curo init
+
+    $ curo new hub team ssh://team.example.com/
+
+    $ curo new project apples
+    New project: 1 (apples) <d323c322-da75-11e0-8cfa-fbf8100e3f89>
+
+    $ curo push apples team:
+    Connected to ssh://team.example.com/
+    Updates: 1
+
+    $ curo new issue apples
+    New issue: 2 <d323c322-da75-11e0-8cfa-fbf8100e3f89>
+
+=head2 Team Member
+
+On your local machine:
+
+    $ curo init
+    $ curo new hub 
+    $ curo pull  project apples
+
+=head2 Stand-alone / Master
+
+To create an empty repository, which can be used on the local machine
+immediately and/or cloned from elsewhere:
+
+    mkdir mybugs
+    cd mybugs
+    curo init
+
+=head2 Established Remote Repository
+
+You were hacking for example on the curo sources and ran into a
+problem. You want to see all known issues, and maybe create one of your
+own:
+
+    git clone git://github.com/mlawren/curo.git/
+    cd curo
+
+    # hack hack hack - problem so get the issue repo
+
+    curo clone git://github.com/mlawren/curo-issues.git/
+    curo list
+
+    # An unknown problem so create a new issue, ready to be sent
+    # upstream:
+
+    curo new -t "curo is broken" -m "It will not start." -S
+
+    # Actually send it upstream
+    curo push
+
+    # Wait a while, then at some point later check if someone made some
+    # progress:
+    curo pull
+    curo show 1
+
+=head2 Forwarding To Somewhere Other Than Upstream
+
+    curo update 1 -S git://some.other/library-issues.git
+    curo push 1
+
+=head1 FILES
+
+A Curo repository consists of the following files:
+
+=over 4
+
+=item .curo/config
+
+Ini-style text configuration file.
+
+=item .curo/curo.sqlite
+
+SQLite database containing all data.
+
+=item .curo/curo.sqlite.seq
+
+SQLite database used for sequence emulation.
+
+=item $HOME/.gitconfig
+
+Used to extract default username and email information.
+
+=back
+
+=head1 SUPPORT
+
+=for comment
+Curo is self-hosting. Please push your issues to:
+    curo://rekudos.net:curo [NOT IMPLEMENTED]
+
+XMPP(Jabber) chat room is at curo@nomad.rekudos.net.
+
+=head1 SEE ALSO
+
+L<Curo>(3p)
+
+=head1 AUTHOR
+
+Mark Lawrence E<lt>nomad@null.netE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2011 Mark Lawrence <nomad@null.net>
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 3 of the License, or (at your
+option) any later version.
+
+=cut

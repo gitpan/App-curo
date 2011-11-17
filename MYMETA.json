@@ -1,0 +1,69 @@
+{
+   "abstract" : "Distributed Project Management Database",
+   "author" : [
+      "Mark Lawrence <nomad@null.net>"
+   ],
+   "dynamic_config" : 0,
+   "generated_by" : "ExtUtils::MakeMaker version 6.62, CPAN::Meta::Converter version 2.112150",
+   "license" : [
+      "unknown"
+   ],
+   "meta-spec" : {
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
+      "version" : "2"
+   },
+   "name" : "App-curo",
+   "no_index" : {
+      "directory" : [
+         "t",
+         "inc"
+      ]
+   },
+   "prereqs" : {
+      "build" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "6.42",
+            "File::Temp" : 0,
+            "FindBin" : 0,
+            "Test::Database" : "1.11",
+            "Test::Exception" : 0,
+            "Test::More" : 0
+         }
+      },
+      "configure" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : 0
+         }
+      },
+      "runtime" : {
+         "requires" : {
+            "AnyEvent" : 0,
+            "AnyEvent::Handle" : 0,
+            "Carp" : 0,
+            "Cwd" : 0,
+            "Data::UUID" : 0,
+            "EV" : 0,
+            "File::HomeDir" : 0,
+            "File::Spec::Functions" : 0,
+            "Getopt::Long::Descriptive" : 0,
+            "JSON::XS" : 0,
+            "Log::Any" : 0,
+            "Moo" : 0,
+            "SQL::DB" : "0.19_10",
+            "SQL::DBx::Deploy" : 0,
+            "SQL::DBx::Sequence" : 0,
+            "SQL::DBx::Simple" : 0,
+            "Sub::Exporter" : 0,
+            "Sys::Cmd" : "0.07_2",
+            "Term::ANSIColor" : 0,
+            "Term::Prompt" : 0,
+            "Time::Duration" : 0,
+            "Time::Local" : 0,
+            "Try::Tiny" : 0,
+            "perl" : "5.006"
+         }
+      }
+   },
+   "release_status" : "testing",
+   "version" : "0.01_01"
+}

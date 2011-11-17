@@ -1,0 +1,43 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use App::curo_sync::Dispatcher;
+App::curo_sync::Dispatcher->run;
+
+__END__
+
+
+=head1 NAME
+
+curo-sync - synchronization process for curo
+
+=head1 VERSION
+
+Still under heavy development.
+
+=head1 SYNOPSIS
+
+  curo-sync DIRECTORY
+
+=head1 DESCRIPTION
+
+Receive synchronization requests from curo clients.
+
+=head1 SEE ALSO
+
+L<curo>(1)
+
+=head1 AUTHOR
+
+Mark Lawrence E<lt>nomad@null.netE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2011 Mark Lawrence <nomad@null.net>
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 3 of the License, or (at your
+option) any later version.
+
+=cut

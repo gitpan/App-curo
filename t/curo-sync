@@ -1,0 +1,10 @@
+#!/usr/bin/perl
+# A test 'curo-sync' that uses the local ../lib dir.
+use strict;
+use warnings;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+
+use App::curo_sync::Dispatcher;
+App::curo_sync::Dispatcher->run;
+
