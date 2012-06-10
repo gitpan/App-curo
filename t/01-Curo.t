@@ -1,111 +1,99 @@
 use strict;
 use warnings;
-use Cwd;
-use File::Temp qw/tempdir/;
+use Curo;
+use File::chdir;
+use File::Temp;
 use Test::More;
 use Test::Database;
-use File::Spec::Functions qw/catfile catdir/;
-use Curo;
+use Path::Class;
 
-my $cwd;
-BEGIN { $cwd = getcwd }
+my @handles = Test::Database->handles(qw/ Pg SQLite /);
 
-can_ok(
-    'Curo', qw/
-      new
-      /
-);
-
-my @handles = Test::Database->handles(qw/ Pg SQLite /);    #Pg mysql /);
-
-if ( !@handles ) {
-    plan skip_all => "No database handles to test with";
-}
-
-my $tempdir;
 foreach my $handle (@handles) {
-    chdir $cwd || die "chdir: $!";
-    $tempdir = tempdir( CLEANUP => 1 );
-    chdir $tempdir || die "chdir: $!";
-    diag $handle->dbd . ' in ' . $tempdir;
+    my $tempdir = File::Temp->newdir;
+    local $CWD = $tempdir;
 
-    if ( $handle->dbd eq 'SQLite' ) {
-        $handle->driver->drop_database( $handle->name );
-        $handle->driver->drop_database( $handle->name . '.seq' );
-    }
+    diag $handle->dbd . ' in ' . $CWD;
 
     my ( $dsn, $user, $pass ) = $handle->connection_info;
 
-    if ( $handle->dbd eq 'Pg' ) {
-        my $dbh = $handle->dbh;
-        $dbh->do("SET client_min_messages = WARNING;");
-        my $list = $dbh->selectall_arrayref(
-            "SELECT 'DROP TABLE ' || n.nspname || '.' ||
-c.relname || ' CASCADE;' FROM pg_catalog.pg_class AS c LEFT JOIN
-pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace WHERE relkind =
-'r' AND n.nspname NOT IN ('pg_catalog', 'pg_toast') AND
-pg_catalog.pg_table_is_visible(c.oid)"
-        );
-
-        foreach my $s (@$list) {
-            $dbh->do( $s->[0] );
-        }
-
-        $list = $dbh->selectall_arrayref(
-            "SELECT 'DROP SEQUENCE ' || n.nspname || '.' ||
-c.relname || ' CASCADE;' FROM pg_catalog.pg_class AS c LEFT JOIN
-pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace WHERE relkind =
-'S' AND n.nspname NOT IN ('pg_catalog', 'pg_toast') AND
-pg_catalog.pg_table_is_visible(c.oid)"
-        );
-
-        foreach my $s (@$list) {
-            $dbh->do( $s->[0] );
-        }
-
-        $list = $dbh->selectall_arrayref(
-            "SELECT 'DROP FUNCTION ' || ns.nspname || '.' || proname || '(' ||
-oidvectortypes(proargtypes) || ');' FROM pg_proc INNER JOIN
-pg_namespace ns ON (pg_proc.pronamespace = ns.oid) WHERE ns.nspname =
-'public'  order by proname;"
-        );
-
-        foreach my $s (@$list) {
-            $dbh->do( $s->[0] );
-        }
-    }
+    $dsn = 'dbi:SQLite:dbname=curo.sqlite' if $handle->dbd eq 'SQLite';
 
     my $db = Curo->new(
-        dir      => $tempdir,
         dsn      => $dsn,
         username => $user,
         password => $pass,
-        init     => 1,
     );
 
     isa_ok $db , 'Curo';
-    isa_ok $db->config, 'Curo::Config';
-    is $db->dir, $tempdir, 'dir';
 
-    $db = Curo->new( dir => $tempdir );
-    isa_ok $db , 'Curo';
-    isa_ok $db->config, 'Curo::Config';
-    is $db->dir, $tempdir, 'dir';
+    ok $db->upgrade, 'initialization';
 
-    $db->insert_project(
+    # insert a parent
+    ok $db->insert_project(
         {
             title  => 'new p',
             email  => 'sdlkf',
             author => 'sdlkfj',
-            name   => 'myproj'
+            name   => 'p',
+            phase  => 'run',
         }
-    );
+      ),
+      'insert p';
+
+    is $db->one_and_only_project_path, 'p', 'insert_project';
+
+    my $pid = $db->path2project_id('p');
+    ok $pid, 'path2project_id' . $pid;
+    is $db->id2thread_type($pid), 'project', 'id2thread_type';
+
+    # insert a child
+    ok $db->insert_project(
+        {
+            title             => 'new p',
+            email             => 'sdlkf',
+            author            => 'sdlkfj',
+            name              => '2',
+            parent_project_id => $pid,
+            phase             => 'run',
+
+        }
+      ),
+      'insert p/2';
+
+    my $cid = $db->path2project_id('p/2');
+    ok $cid, 'child at right path';
+    is $db->id2thread_type($cid), 'project', 'id2thread_type';
+
+    # remove child and check
+    ok $db->drop_project($cid), 'drop child';
+    ok !$db->id2thread_type($cid), 'no id2thread_type';
+
+    # but parent still there
+    ok $pid, 'path2project_id' . $pid;
+    is $db->id2thread_type($pid), 'project', 'id2thread_type';
+
+    # insert a new child at same path
+    ok $db->insert_project(
+        {
+            title             => 'new p',
+            email             => 'sdlkf',
+            author            => 'sdlkfj',
+            name              => '2',
+            parent_project_id => $pid,
+            phase             => 'run',
+
+        }
+      ),
+      'insert p/2 again';
+
+    $cid = $db->path2project_id('p/2');
+    ok $cid, 'path2project_id ' . $cid;
+
+    ok $db->drop_project($pid), 'drop parent project';
+    ok !$db->id2thread_type($cid), 'no child';
+    ok !$db->id2thread_type($pid), 'no parent';
 }
 
 done_testing();
-
-# Force File::Temp to cleanup _after_ we have got out of its directory.
-END {
-    chdir $cwd;
-}
 

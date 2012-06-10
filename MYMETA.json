@@ -1,10 +1,10 @@
 {
-   "abstract" : "Distributed Project Management Database",
+   "abstract" : "Distributed Project Management System",
    "author" : [
       "Mark Lawrence <nomad@null.net>"
    ],
    "dynamic_config" : 0,
-   "generated_by" : "Module::Install version 1.00, CPAN::Meta::Converter version 2.112150",
+   "generated_by" : "Module::Install version 1.06, CPAN::Meta::Converter version 2.120921",
    "license" : [
       "unknown"
    ],
@@ -16,50 +16,59 @@
    "no_index" : {
       "directory" : [
          "inc",
-         "t"
+         "t",
+         "xt"
       ]
    },
    "prereqs" : {
       "build" : {
          "requires" : {
-            "ExtUtils::MakeMaker" : "6.42",
-            "File::Temp" : 0,
-            "FindBin" : 0,
+            "ExtUtils::MakeMaker" : "6.59",
+            "FindBin" : "0",
+            "IO::Capture::Stdout" : "0",
             "Test::Database" : "1.11",
-            "Test::Exception" : 0,
-            "Test::More" : 0
+            "Test::Exception" : "0",
+            "Test::More" : "0"
          }
       },
       "configure" : {
          "requires" : {
-            "ExtUtils::MakeMaker" : "6.42"
+            "ExtUtils::MakeMaker" : "6.59"
          }
       },
       "runtime" : {
          "requires" : {
-            "AnyEvent" : 0,
-            "AnyEvent::Handle" : 0,
-            "Carp" : 0,
-            "Cwd" : 0,
-            "Data::UUID" : 0,
-            "EV" : 0,
-            "File::HomeDir" : 0,
-            "File::Spec::Functions" : 0,
-            "Getopt::Long::Descriptive" : 0,
-            "JSON::XS" : 0,
-            "Log::Any" : 0,
-            "Moo" : 0,
-            "SQL::DB" : "0.19_11",
-            "SQL::DBx::Deploy" : 0,
-            "SQL::DBx::Sequence" : 0,
-            "SQL::DBx::Simple" : 0,
-            "Sub::Exporter" : 0,
-            "Sys::Cmd" : "0.07_2",
-            "Term::ANSIColor" : 0,
-            "Term::Prompt" : 0,
-            "Time::Duration" : 0,
-            "Time::Local" : 0,
-            "Try::Tiny" : 0,
+            "AnyEvent" : "0",
+            "AnyEvent::Handle" : "0",
+            "Carp" : "0",
+            "Cwd" : "0",
+            "DBD::SQLite" : "1.37",
+            "Digest::SHA1" : "0",
+            "Exporter::Tidy" : "0",
+            "File::Basename" : "0",
+            "File::HomeDir" : "0",
+            "File::Temp" : "0",
+            "File::chdir" : "0",
+            "IO::Pager" : "0.24",
+            "JSON::XS" : "0",
+            "Log::Any" : "0",
+            "Log::Dispatch" : "0",
+            "Moo" : "0",
+            "OptArgs" : "0",
+            "Path::Class" : "0",
+            "Proc::InvokeEditor" : "0",
+            "SQL::DB" : "v0.191.0",
+            "SQL::DBx::Deploy" : "0",
+            "SQL::DBx::SQLite" : "0",
+            "Sys::Cmd" : "0.08",
+            "Term::ANSIColor" : "0",
+            "Term::Prompt" : "0",
+            "Term::Size" : "0",
+            "Text::Autoformat" : "0",
+            "Text::FormatTable" : "0",
+            "Time::Duration" : "0",
+            "Time::Piece" : "0",
+            "Try::Tiny" : "0",
             "perl" : "5.006"
          }
       }
@@ -70,8 +79,8 @@
          "http://opensource.org/licenses/gpl-3.0.html"
       ],
       "repository" : {
-         "url" : "git://github.com/mlawren/curo.git"
+         "url" : "https://github.com/mlawren/curo"
       }
    },
-   "version" : "0.01_02"
+   "version" : "0.0.2_01"
 }

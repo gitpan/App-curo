@@ -1,15 +1,16 @@
-#!/usr/bin/perl
+#!perl
 use strict;
 use warnings;
-use App::curo_sync::Dispatcher;
-App::curo_sync::Dispatcher->run;
+use OptArgs qw/dispatch/;
+
+dispatch(qw/run App::curo_sync/);
 
 __END__
 
 
 =head1 NAME
 
-curo-sync - synchronization process for curo
+curo-sync - synchronization server for curo clients
 
 =head1 VERSION
 
@@ -17,11 +18,17 @@ Still under heavy development.
 
 =head1 SYNOPSIS
 
-  curo-sync DIRECTORY
+  curo-sync [-d all] DIRECTORY
 
 =head1 DESCRIPTION
 
 Receive synchronization requests from curo clients.
+
+Input is accepted on I<stdin>. Normal output is printed to I<stdout>.
+Error messages are sent to I<stderr>.  Using C<-d all> will also send
+debugging information to I<stderr>.
+
+An exit value of zero indicates success.
 
 =head1 SEE ALSO
 

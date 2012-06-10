@@ -1,0 +1,170 @@
+* Calculate parent project prefix trees from sub-project hashes instead
+* of putting every thread update in every project prefix.
+
+* Add the push_to update on the hub not the client (security?)?
+
+* include update_uuid in messages so we can check that both sides think
+ they have the same update, otherwise it could turn into a mess.
+
+* 'depends' should be on a 'project:id:<!active|!stalled>' variable.
+
+* Determine if 'depends' can be across projects. If it is a per-project
+ parameter, etc.
+
+* Determine if 'depends' can be on aother project we have 'pushed' and
+ issue to
+
+* Convert task_updates.project_id to project_uuid and drop the foreign
+  key requirement. Same for issue/bug/whatever.
+  OR
+  Import the project from the hub instead
+
+* Prefix tree:
+
+        1
+       a  b
+      f    e    f
+  1af       1be 1bf
+
+
+  1     x
+  1 a   x
+  1 a f x
+  1 b   x    2. rm & fix
+  1 b 7 x
+  1 b e x    1. rm & fix
+  1 b f x
+
+* workflow?
+    - State transition management without a new domain specific
+      language?
+
+* When creating a sub-project inherit the parent project task-states
+ and issue-states? Better to specify '--from' or '--template' instead.
+
+* Feature, Defect, Patch, Task, Enhancement, FAQ, Issue, Bug, ...
+    - How to abstract all of this and make curo flexible enough to do
+      all of the above?
+
+* FAQ support
+    $ curo new faqgroup
+    $ curo list faqgroups
+
+    $ curo new faq [GROUP]
+    Project: documentation
+    Question: What is the best way to make curo popular?
+    Answer[/e to edit]: Buggered if I know
+
+    $ curo list faqs
+
+* Document how:
+    - subtasks can be handled with sub-projects
+    - milestones can be handled with sub-projects
+    - tagging can be handled with sub-projects
+
+* 'Assigned' support
+    - only to a single user at any one time?
+    - depends on user/contact support?
+    - A per-project field?
+    - Forget about it?
+
+* sub-task support
+
+* make 'depends' 'blocked'
+
+* Index and and 'find' or 'search' command
+
+* Include replied-to text as a comment inside the edit file
+
+Per-repository SHA1 has that correlates to an organisation. Then when a
+hub is pulled from (or created) the local 'hubs' table is updated with the
+remote hash and the matching name of the organisation. Is the goal to
+make the hub hash independent from the hub location?
+
+A global directory of org hashes? What if A -> B -> C. A updates. B
+knows who it was because they have a hub pointingn to A. How about
+another table of 'organisations' that the *_updates table references?
+
+* Undefined error() routing in App::curo::Util?
+
+    colord:x:120:130:colord colour management daemon,,,:/var/lib/colord:/bin/false
+
+    Press ENTER or type command to continue
+    Undefined subroutine &App::curo::Util::error called at /home/mark/src/curo/t/../lib/App/curo/Util.pm line 196.
+
+keywords:
+
+    fractioned
+    partial
+    unified
+    synchronised
+    distributed
+    federated
+    derived
+    fused (fusion)
+    synthesized
+
+
+    fractional synchronisation
+
+    fracsync
+    fracsynced
+
+
+    unifyed.com
+
+    uf init
+    uf list
+    uf new project
+    
+
+
+A fundamental improvement over most other bug tracking systems.
+
+Uses a combination of hash tree, and prefix tree, and possibly
+prefix-hash-tree?
+
+
+
+* Old name was 'ddb' - can go back if curo is taken.
+
+
+
+
+
+Descriptions:
+
+    Issue tracking systems usually integrate more with customers and
+    customer issues. An issue could be "help me install this" or "How
+    do I get the fubar into the flim flam." They could even be
+    something like "I need an evalutation key for your software".
+
+    Bug tracking systems help you keep track of wrong or missing things
+    from the program.
+
+    When looking at web systems, there is usually a big difference in
+    focus, either helping customers or tracking problems with your
+    software.
+
+
+
+    The difference could be clearer from the following example.
+
+    Suppose you had a production issue today that affected 5 customers, but
+    was caused by a single software defect.
+
+    In your issue-tracking system, you opened 5 tickets and started
+    tracking what each customer reported, what was communicated to them,
+    when the software patch was applied, etc. You can track that kind of
+    stuff separately for each customer.
+
+    In your bug-tracking system, you made 1 entry for the software defect
+    started tracking things like steps to reproduce, code changes, etc.
+
+    Customer issues can be closed whenever they're remedied to the
+    customer's satisfaction and that may or may not involve fixing the
+    software. The bug can be closed when it's fixed and retested.
+
+    Two systems, outward- and inward-facing, tracking two different kinds
+    of things, each with its own life cycle.
+

@@ -13,3 +13,5 @@ Makefile.old
 ^old
 ^\.
 ^App-curo
+^doc
+xt

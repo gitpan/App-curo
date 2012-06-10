@@ -1,19 +1,21 @@
-#!/usr/bin/perl
+#!perl
 use strict;
 use warnings;
-use App::curo::Dispatcher;
-App::curo::Dispatcher->run;
+use OptArgs qw/dispatch/;
+
+dispatch(qw/run App::curo::Cmd/);
 
 __END__
 
+=encoding utf-8
 
 =head1 NAME
 
-curo - distributed project management database
+curo - distributed project management tool
 
 =head1 VERSION
 
-Alpha - still under heavy development.
+0.0.2 Development Release
 
 =head1 SYNOPSIS
 
@@ -21,23 +23,32 @@ Alpha - still under heavy development.
 
 =head1 DESCRIPTION
 
-Curo is a scalable, distributed project management system designed to
-perform independent of location or connectivity status. Don't let that
-scare you away though; Curo has also been designed to be simple to use
-and works just as well for standalone projects.
+=for comment
+"No project need stand alone"
+"extremely cooperative project management system"
+"inter-project management system"
+cips - Cooperative Inter-Project management System
+ejidal
+conjoin: to join together (as separate entities) for a common purpose 
 
-Every Curo database is a fully-functional repository of state and
-history, easily modified without needing access to a central server.
-The databse schema allows for the creation and efficient querying of
-tasks, issues, and nested (hierarchical) projects.
+Curo is a project management system that enables efficient
+communication through inter-project cooperation. The key features of
+disconnected operation and fast synchronisation provide provide
+location independent performance.
 
-The system is truly distributed in the sense that status updates and
-comments are tracked globally. Tasks and issues can be synchronized
-across projects hosted on different repositories. Entire projects can
-be pushed or pulled as sub-elements of other projects. These key
-features, when used widely, allow individuals to focus on their own
-view of projects' activities and to combine them together in unique
-ways.
+Every Curo repository contains a fully-functional database of state and
+history.  The database schema allows for the creation and efficient
+querying of nested (hierarchical) projects and their associated
+components.  Updates do not require access to a central server.
+
+Tasks and issues can be distributed across multiple projects. Entire
+projects can be replicated between repositories.  Meta information
+(e.g. task state) is tracked on a per-project basis, but is globally
+visible along with all comments.
+
+Don't let this flexibility scare you away; the B<curo> command-line
+interface is designed for ease of use and is eminently suitable for
+standalone projects.
 
 =for junk
 See L<curo-tutorial>(7) for an in-depth introduction to Curo.
@@ -46,82 +57,115 @@ See L<curo-tutorial>(7) for an in-depth introduction to Curo.
 
 =over 4
 
+=item Repository
+
+A directory containing a configuration file and a collection of threads
+stored in a database.  The current repository is the first F<.curo>
+directory found when searching upwards from the current working
+directory. The terms repository and database are often used
+interchangeably.
+
+=item Thread
+
+A conversion (history) about a specific topic plus its current
+properties (state).  Tasks, Issues, Feature Requests, Bugs, FAQs etc as
+well as Projects, Hubs and Links can all be considered threads.
+
 =item Project
 
-A collection of tasks and issues, and possibly sub-projects. Has a
-name, title, phase and a history. Is always specified by its path which
-includes the names of all parent projects concatenated together with
-'/'. A project can exist across multiple repositories.
+A collection of threads and possibly sub-projects. Has a name, title,
+phase and a history.  Is always specified by its path which includes
+the names of all parent projects concatenated together with F</>. A
+project can be replicated across multiple repositories.
 
 =item Task
 
-An item of work to be performed. Has an ID, UUID, title, status and a
-history. A task can exist in multiple projects across multiple
+An item of work to be performed. Has an ID, UUID, title, state and a
+history. A task can be distributed across multiple projects in multiple
 repositories.
 
 =item Issue
 
 A problem that may prevent project completion. Has an ID, UUID, title,
-status and a history. An issue can exist in multiple projects across
-multiple repositories.
+state and a history. An issue can be distributed across multiple
+projects in multiple repositories.
 
 =item Hub
 
-A remote synchronization point around which you can share projects,
-tasks, or issues.  Is specified either by its location or by an alias
-created with the 'new hub' command.
+A repository located at a remote synchronization point around which you
+can share projects, tasks, or issues.  Is specified either by its
+location URI or by an alias created with the 'new hub' command.
 
 =item ID
 
-A locally-unique integer identifying a task or issue.
+A locally-unique integer identifying a thread in the local repository.
 
 =item UUID
 
-A globally-unique SHA1 hash identifying a task or issue.
+A globally-unique SHA1 hash identifying a task or issue anywhere.
+
+=item UPDATE_ID
+
+A locally-unique integer prefixed with a "u" indentifying a single
+update or comment.
 
 =back
 
 =head1 COMMANDS
 
-Curo commands are based on the initialize, modify, display and
-propagate ideas that users of distributed version control systems
-should find familiar. The command map summary for everyday use is shown
-below. Commands that propagate data are marked with a [*].  Everything
-else performs only local actions.
+The command map summary for B<curo> is shown below.  Commands are based
+on the initialize, modify, display and propagate ideas that users of
+distributed version control systems should find familiar.
 
-=for junk
-        clone [*]
-        pull [*]
+    curo init [DIRECTORY]
+    curo new TYPE
+        curo new project [NAME] [TITLE...]
+        curo new task [TITLE...]
+        curo new issue [TITLE...]
+        curo new hub [ALIAS] [LOCATION]
+    curo list [TYPE]
+        curo list projects 
+        curo list tasks [PROJECT]
+        curo list issues [PROJECT]
+        curo list hubs 
+        curo list links 
+        curo list project-threads 
+    curo show THREAD
+    curo log [THREAD]
+    curo update THREAD
+    curo drop THREAD
+    curo upgrade [HUB]
+    curo pull THREAD HUB [PROJECT]
+    curo push THREAD HUB [PROJECT]
+    curo sync [THREAD] [HUB]
+    curo ALIAS 
 
-    init            Setup a new database or hub
-    new             Create something new
-    list            List project tasks and issues
-    log             Review update history
-    update          Comment or modify something
-    push [*]        Send updates to a hub
-    status          Show project status
-    upgrade         Upgrade existing database or hub
+Input is accepted on I<stdin>.  Arguments and options not supplied on
+the command line are prompted for.  An editor based on the EDITOR or
+VISUAL environment variables may be invoked for certain types of input.
 
+Normal output is printed to I<stdout> and sometimes paged with
+L<less>(1) when I<stdout> is connected to a terminal. Error messages
+are sent to I<stderr>.  Adding C<-d all> to the end of any command adds
+debugging information to I<stdout>.
 
-Curo accepts input on C<stdin>. Normal output is printed to C<stdout>,
-or paged with C<less> or C<more> if C<stdout> is connected to a
-terminal.  Error messages go to C<stderr>.  A exit value of zero
-indicates success.
+An exit value of zero indicates success.
 
-Running Curo with no command produces a usage message.  Arguments and
-options not supplied on the command line are prompted for.  Adding C<-d
-all> to the end of any command adds debugging information to C<stdout>.
-An editor based on the EDITOR or VISUAL environment variables may be
-invoked for some commands.
+The only commands requiring network communication with a hub are
+C<push>, C<pull> and C<sync>; everything else performs local-only
+actions.
 
 =head2 Initialization
 
 =over 4
 
-=item init [--hub] [DIRECTORY]
+=item init [--hub] [--todo | -t] [DIRECTORY]
 
 Create an empty Curo repository. The repository is created inside a
-hidden C<.curo> sub-directory unless C<--hub> is given.
+hidden F<.curo> sub-directory unless C<--hub> is used.
+
+A personal TODO project can be automatically created after
+initialization with the C<--todo | -t>  options.
 
 =for junk
 =item clone LOCATION[:REMOTE_PROJECT] [DIRECTORY]
@@ -153,18 +197,18 @@ the following:
 
 =back
 
-=item new issue [PROJECT] [TITLE] [-s STATUS] [-c COMMENT]
+=item new issue [-p PROJECT] [-s STATE] [-c COMMENT] [TITLE] 
 
 Create a new issue.
 
-=item new task [PROJECT] [TITLE] [-s STATUS] [-c COMMENT]
+=item new task [-p PROJECT] [-s STATE] [-c COMMENT] [TITLE]
 
 Create a new task.
 
-=item new project [[PARENT/]NAME] [TITLE] [-p PHASE] [-c COMMENT]
+=item new project [-p PHASE] [-c COMMENT] [PARENT/]NAME [TITLE]
 
-Create a new project. An optional PARENT may be prepended to the name
-to create the project as a sub-project of an existing project.
+Create a new project. The optional [PARENT/] may be specified in order
+to create this as a sub-project.
 
 =back
 
@@ -185,12 +229,29 @@ by name.
 =item list issues
 
 List issues in the database showing issue ID, title, project, and
-status. Issues are ordered by project path, then by ID.
+state. Issues are ordered by project path, then by ID.
 
 =item list tasks
 
-List tasks in the database showing issue ID, title, project, and
-status. Tasks are ordered by project path, then by ID.
+List tasks in the database showing issue ID, title, project, and state.
+Tasks are ordered by project path, then by ID.
+
+=item list projects
+
+List projects in the database showing path, title, phase, number of
+tasks and number of issues. Rows are ordered by path.
+
+=item list project-phases
+
+List the phases that a project can have. A per-project value.
+
+=item list task-states
+
+List the types that a task can have. A per-project value.
+
+=item list issue-states
+
+List the types that an issue can have. A per-project value.
 
 =item log
 
@@ -204,12 +265,7 @@ paged with C<less> or C<more>.
 
 =item log PROJECT
 
-Display the history of PROJECT.
-
-=item status
-
-Display a summary of the database. Lists each project showing the
-title, phase, task count and issue count.
+Display the history of the project.
 
 =back
 
@@ -217,15 +273,30 @@ title, phase, task count and issue count.
 
 =over 4
 
-=item update ID [-s STATUS]
+=item update ID [-s STATE] [--title TITLE]
 
-Add a comment and/or modify the status of the task or issue identified
-by ID.
+Modify the state or title of the task or issue identified by ID. A
+comment is expected.
 
 =item update PROJECT [-p PHASE]
 
-Add a comment and/or modify the phase of the project identified by
-PROJECT.
+Modify the phase or title of a project. A comment is expected.
+
+=item reply ID | PROJECT | UPDATE_ID
+
+Add a comment to a task, issue or project. If an UPDATE_ID is given
+instead of an ID or PROJECT the comment will be recorded as a reply to
+a previous update or comment.
+
+=item drop [--force | -f] [PROJECT:]ID
+
+Delete a task or issue from the database. Will prompt for confirmation
+without C<--force>.
+
+=item drop [--force | -f] PROJECT
+
+Delete a project from the database. Will prompt for confirmation
+without C<--force>.
 
 =back
 
@@ -248,6 +319,12 @@ Send updates from the local task or issue with ID to a remote project.
 HUB is either a location or a previously created hub name.
 
 =for comment
+=item push [PATH:]ID .. [--no-track]
+Push the task or issue with ID to the parent project of PATH.
+If ID only exists in one project then the PATH: component is optional.
+Think of this in terms of "escalate or push this bug upstream".
+
+=for comment
 =item push
 Send updates from local tasks, issues or projects to hubs that have
 previously been pushed to or pulled from (except where the --no-track
@@ -262,10 +339,13 @@ updates) into a local project. PROJECT defaults to REMOTE_PROJECT.  HUB
 is either a location or a previously created hub.
 A project can be re-parented during a pull but the name must remain the
 same.
-=item pull
-Incorporate changes from hubs that have previously been pushed to or
-pulled from (except where the --no-track option was used). [NOT
-IMPLEMENTED]
+
+=item pull HUB:REMOTE_PROJECT [PROJECT]
+
+Pull a project (including its tasks and issues) from a remote
+repository into the local repository.  HUB is either a location URI or
+a previously defined hub alias.  A project can be re-parented during a
+pull by specifying PROJECT.
 
 =back
 
@@ -282,88 +362,113 @@ software.
 
 =head1 EXAMPLES
 
-=head2 Stand-alone Project
+We'll begin with the standalone scenario: a single individual who needs
+to manage a to-do list, which in this particular case can be
+automatically created when a repository is initialised:
 
-    $ curo init
-    $ curo new project garden
-    New project: 1 (garden) <d323c322-da75-11e0-8cfa-fbf8100e3f89>
-    $ curo new task garden Turn the dirt over
-    New task: 2 <d323c322-da75-11e0-8cfa-fbf8100e3f89>
-    $ curo status
-    ...
-    $ curo log 2
-    ...
+    $ curo init --todo
+    Database initialised (v93) in .curo/
+    Project created: todo <adb8215b>
 
-=head2 Project Manager
+For the standalone scenario (as for all scenarios) the repository is
+modifiable completely independently of any other repository.
 
-On the machine (teamhost.example.com) that hosts your Curo HUB:
+    $ curo new task
+    Task: Take out the rubbish
+    Task created: 2 <353b8a75>
 
-    teamhost$ curo init --hub
+    $ curo new issue
+    Title: I'm sick of taking out the rubbish
+    Issue created: 3 <569e2e5d>
 
-Then on your local machine:
+Tasks and issues can be viewed, commented on and updated with the
+appropriate commands:
 
-    $ curo init
+    $ curo list
+     ID  Topic (todo)                        State        
+    ------------------------------------------------------
+      2  Take out the rubbish                open (task)  
+      3  I'm sick of taking out the rubbish  open (issue) 
 
-    $ curo new hub team ssh://team.example.com/
+    $ curo update 2 -s done
+    Comment: Sigh, had to take it out myself
+    Task updated: 2 (c6) <353b8a75>
 
-    $ curo new project apples
-    New project: 1 (apples) <d323c322-da75-11e0-8cfa-fbf8100e3f89>
+    $ curo log 4
+    Task:  4 <f0417b4b0ac625461d65be3e7c681f984e27d65c>
+    From:  Mark Lawrence <nomad@null.net>              
+    When:  1 hour ago <2012-03-25 20:39:09Z>           
+    State: todo:open                                   
 
-    $ curo push apples team:
-    Connected to ssh://team.example.com/
-    Updates: 1
+    lkjsd flkdsf lkjds f
 
-    $ curo new issue apples
-    New issue: 2 <d323c322-da75-11e0-8cfa-fbf8100e3f89>
 
-=head2 Team Member
+        Comment: c6 <2465ce6d2d9ab77b7b02bcf171494c1261a38f5a>
+        From:    Mark Lawrence <nomad@null.net>               
+        When:    3 seconds ago <2012-03-25 21:50:39Z>         
+        State:   todo:done                                    
 
-On your local machine:
+        Just because I did it
 
-    $ curo init
-    $ curo new hub 
-    $ curo pull  project apples
+Our user knows that the catch all to-do list will quickly become too
+unwieldy to manage everything in life, and so decides to group the next
+set of tasks and issues together. This can be done with a new project:
 
-=head2 Stand-alone / Master
+    $ curo new project garden A growing project
+    Project created: garden <36dfe243>
 
-To create an empty repository, which can be used on the local machine
-immediately and/or cloned from elsewhere:
+    $ curo new task Turn the dirt over
+    Project: garden
+    Task created: 5 <36dfe243>
 
-    mkdir mybugs
-    cd mybugs
-    curo init
+Because there is now more than one project in the repository, a new
+task or issue command will prompt for the associated project, or the
+project can be specified with a flag:
 
-=head2 Established Remote Repository
+    $ curo new task Buy the seeds for later sowing -p garden
+    Task created: 6 <36dfe243>
 
-You were hacking for example on the curo sources and ran into a
-problem. You want to see all known issues, and maybe create one of your
-own:
+    $ curo list
+     ID  Topic (garden)                      State        
+    ------------------------------------------------------
+      5  Turn the dirt over                  open (task)  
+      6  Buy the seeds for later sowing      open (task)  
 
-    git clone git://github.com/mlawren/curo.git/
-    cd curo
+     ID  Topic (todo)                        State        
+    ------------------------------------------------------
+      2  Take out the rubbish                open (task)  
+      3  I'm sick of taking out the rubbish  open (issue) 
 
-    # hack hack hack - problem so get the issue repo
+The current project summary is easily obtained:
 
-    curo clone git://github.com/mlawren/curo-issues.git/
-    curo list
+    $ curo list projects
+     Project  Title                 Phase  Tasks Issues 
+    ----------------------------------------------------
+     garden   A growing project     run        2      0 
+     todo     A personal TODO list  run        1      0 
 
-    # An unknown problem so create a new issue, ready to be sent
-    # upstream:
+By default, the various C<list> commands assume a task and issue status
+of "active". Detailed summaries of task and issue states are also
+available:
 
-    curo new -t "curo is broken" -m "It will not start." -S
+    $ curo list task-states
+     Project Rank  Status    Default State     Count 
+    ---------------------------------------------------
+     garden    10  active          * open          1 
+     garden    20  active            assigned      0 
+     garden    30  stalled           needinfo      0 
+     garden    40  stalled           upstream      0 
+     garden    50  stalled           depends       0 
+     garden    60  resolved          done          0 
+     garden    70  closed            cancel        0 
 
-    # Actually send it upstream
-    curo push
-
-    # Wait a while, then at some point later check if someone made some
-    # progress:
-    curo pull
-    curo show 1
-
-=head2 Forwarding To Somewhere Other Than Upstream
-
-    curo update 1 -S git://some.other/library-issues.git
-    curo push 1
+     todo      10  active          * open          1 
+     todo      20  active            assigned      0 
+     todo      30  stalled           needinfo      0 
+     todo      40  stalled           upstream      0 
+     todo      50  stalled           depends       0 
+     todo      60  resolved          done          1 
+     todo      70  closed            cancel        0 
 
 =head1 FILES
 
@@ -371,19 +476,21 @@ A Curo repository consists of the following files:
 
 =over 4
 
-=item .curo/config
+=item F<.curo/config>
 
 Ini-style text configuration file.
 
-=item .curo/curo.sqlite
+=item F<.curo/curo.sqlite>
 
 SQLite database containing all data.
 
-=item .curo/curo.sqlite.seq
+=back
 
-SQLite database used for sequence emulation.
+The following other files may also be used:
 
-=item $HOME/.gitconfig
+=over 4
+
+=item F<$HOME/.gitconfig>
 
 Used to extract default username and email information.
 
@@ -391,11 +498,7 @@ Used to extract default username and email information.
 
 =head1 SUPPORT
 
-=for comment
-Curo is self-hosting. Please push your issues to:
-    curo://rekudos.net:curo [NOT IMPLEMENTED]
-
-XMPP(Jabber) chat room is at curo@nomad.rekudos.net.
+Not yet available.
 
 =head1 SEE ALSO
 

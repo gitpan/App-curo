@@ -1,0 +1,62 @@
+
+=head1 NAME
+
+Curo - Distributed Project Management System
+
+=head1 VERSION
+
+0.0.2 Development release.
+
+=head1 SYNOPSIS
+
+    use Curo;
+
+    my $db = Curo->new(
+        dir => '/path/to/.curo',
+    );
+
+=head1 DESCRIPTION
+
+To be documented.
+
+=head1 ATTRIBUTES
+
+=over 4
+
+=item TBD
+
+To be documented.
+
+=back
+
+=head1 METHODS
+
+=over 4
+
+=item TBD
+
+To be documented.
+
+=back
+
+=head1 SEE ALSO
+
+L<curo>(1)
+
+=head1 SUPPORT
+
+Not available yet.
+
+=head1 AUTHOR
+
+Mark Lawrence E<lt>nomad@null.netE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2011 Mark Lawrence <nomad@null.net>
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 3 of the License, or (at your
+option) any later version.
+

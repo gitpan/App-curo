@@ -1,4 +1,4 @@
-package Curo::Deploy::SQLite; our $VERSION = '0.01_02';
+package Curo::Deploy::SQLite; our $VERSION = '0.0.2';
 1;
 
 =head1 NAME
@@ -10,7 +10,7 @@ Curo::Deploy::SQLite - curo deployment SQL
   use SQL::DB;
   use SQL::DBx::Deploy;
 
-  my $db = SQL::DB->connect($dsn, $username, $password);
+  my $db = SQL::DB->connect('dbi:SQLite:...', 'username', 'password');
   $db->deploy('Curo::Deploy');
 
 =head1 DESCRIPTION
@@ -36,77 +36,533 @@ __DATA__
 
 - sql: |
     CREATE TABLE threads (
-      thread_id INTEGER PRIMARY KEY NOT NULL,
-      thread_uuid varchar(80) NOT NULL UNIQUE,
-      thread_type varchar NOT NULL,
-      last_update_id INTEGER NOT NULL DEFAULT -1,
-      ctime TIMESTAMP NOT NULL,
-      mtime TIMESTAMP NOT NULL,
-      lang varchar(8) NOT NULL DEFAULT 'en',
-      locale varchar(8),
-      title varchar(1024) NOT NULL
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        uuid BLOB NOT NULL UNIQUE,
+        thread_type VARCHAR NOT NULL,
+        ctime INTEGER NOT NULL,
+        ctimetz INTEGER NOT NULL,
+        mtime INTEGER NOT NULL,
+        mtimetz INTEGER NOT NULL,
+        lang VARCHAR(8) NOT NULL DEFAULT 'en',
+        locale VARCHAR(8),
+        title VARCHAR(1024) NOT NULL
     );
 
-- sql: |
-    CREATE UNIQUE INDEX unique_threads_thread_uuid ON threads (thread_uuid);
+- perl: |
+    $self->sqlite_create_sequence('threads');
 
 - sql: |
     CREATE TABLE thread_updates (
-      thread_update_id INTEGER PRIMARY KEY NOT NULL,
-      thread_update_uuid varchar(80) NOT NULL UNIQUE,
-      thread_id integer NOT NULL,
-      thread_type varchar,
-      itime TIMESTAMP NOT NULL,
-      mtime TIMESTAMP NOT NULL,
-      author varchar(255) NOT NULL,
-      email varchar(255) NOT NULL,
-      push_to varchar,
-      lang varchar(8) NOT NULL DEFAULT 'en',
-      title varchar(1024),
-      comment text,
-      s0 text,
-      s1 text,
-      s2 text,
-      s3 text,
-      s4 text,
-      FOREIGN KEY(thread_id) REFERENCES threads(thread_id)
-    );
-
-- sql: |
-    CREATE UNIQUE INDEX unique_thread_updates_thread_update_uuid ON
-    thread_updates (thread_update_uuid);
-
-- sql: |
-    CREATE TABLE project_phases (
-      phase varchar(40) NOT NULL DEFAULT 'definition',
-      rank integer NOT NULL,
-      PRIMARY KEY (phase)
-    );
-
-- sql: |
-    CREATE TABLE projects (
-      project_id INTEGER PRIMARY KEY NOT NULL,
-      name varchar(40) NOT NULL,
-      parent_id integer,
-      phase varchar(40) NOT NULL,
-      pref_id integer,
-      ref_uuid varchar(36),
-      path varchar collate nocase UNIQUE,
-      FOREIGN KEY(phase) REFERENCES project_phases(phase),
-      FOREIGN KEY(parent_id) REFERENCES projects(project_id),
-      FOREIGN KEY(project_id) REFERENCES threads(thread_id)
-    );
-
-- sql: |
-    CREATE TABLE projects_tree (
-        treeid    INTEGER PRIMARY KEY,
-        parent    integer NOT NULL REFERENCES projects(project_id)
+        update_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        update_uuid BLOB NOT NULL UNIQUE,
+        thread_id INTEGER NOT NULL,
+        parent_update_id INTEGER,
+        itime INTEGER,
+        mtime INTEGER NOT NULL,
+        mtimetz INTEGER NOT NULL,
+        path VARCHAR,
+        author VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        push_to VARCHAR,
+        lang VARCHAR(8) NOT NULL DEFAULT 'en',
+        title VARCHAR(1024),
+        comment text,
+        slots VARCHAR COLLATE NOCASE,
+        FOREIGN KEY(thread_id) REFERENCES threads(id)
             ON DELETE CASCADE,
-        child     integer NOT NULL REFERENCES projects(project_id)
+        FOREIGN KEY(parent_update_id) REFERENCES thread_updates(update_id)
+    );
+
+- perl: |
+    $self->sqlite_create_sequence('thread_updates');
+
+- sql: |
+    CREATE INDEX thread_updates_slots ON thread_updates(slots);
+
+- sql: |
+    CREATE INDEX thread_updates_parent_update_id
+        ON thread_updates(thread_id,parent_update_id);
+
+- sql: |
+    CREATE TRIGGER ai_thread_updates2
+    AFTER INSERT ON thread_updates
+    FOR EACH ROW WHEN NEW.title IS NOT NULL
+    BEGIN
+        UPDATE threads
+        SET
+            title = (
+                SELECT
+                    title
+                FROM
+                    thread_updates
+                WHERE
+                    thread_id = NEW.thread_id AND title IS NOT NULL
+                ORDER BY
+                    mtime DESC, update_id DESC
+                LIMIT 1
+            )
+        WHERE
+            id = NEW.thread_id
+        ;
+    END;
+
+
+- sql: |
+    CREATE TRIGGER ai_thread_updates1
+    AFTER INSERT ON thread_updates
+    FOR EACH ROW
+    BEGIN
+        UPDATE threads
+        SET
+            mtime = (
+                SELECT
+                    MAX(mtime)
+                FROM
+                    thread_updates
+                WHERE
+                    thread_id = NEW.thread_id
+            ),
+            mtimetz = (
+                SELECT
+                    mtimetz
+                FROM
+                    thread_updates
+                WHERE
+                    thread_id = NEW.thread_id
+                ORDER BY
+                    mtime DESC, update_id DESC
+                LIMIT 1
+            )
+        WHERE
+            id = NEW.thread_id
+        ;
+    END;
+
+- sql: |
+    CREATE TRIGGER ai_thread_updates0
+    AFTER INSERT ON thread_updates
+    FOR EACH ROW
+    BEGIN
+        UPDATE
+            thread_updates
+        SET
+            itime = strftime('%s','now')
+        WHERE
+            update_id = NEW.update_id
+        ;
+    END;
+
+- sql: |
+    -- --------------------------------------------------------------------
+    -- A hierarchical data (tree) implementation using triggers
+    -- inside the database as described here:
+    --
+    --   http://www.depesz.com/index.php/2008/04/11/my-take-on-trees-in-sql/
+    --
+    -- Generated by sqltree on Mon Mar 19 05:16:18 2012 for SQLite
+    -- --------------------------------------------------------------------
+    CREATE TABLE thread_updates_tree (
+        treeid    INTEGER PRIMARY KEY,
+        parent    INTEGER NOT NULL REFERENCES thread_updates(update_id)
+            ON DELETE CASCADE,
+        child     INTEGER NOT NULL REFERENCES thread_updates(update_id)
             ON DELETE CASCADE,
         depth     INTEGER NOT NULL,
         UNIQUE (parent, child)
     );
+
+- sql: |
+    -- --------------------------------------------------------------------
+    -- INSERT:
+    -- 1. Insert a matching row in thread_updates_tree where both parent and child
+    -- are set to the id of the newly inserted object. Depth is set to 0 as
+    -- both child and parent are on the same level.
+    --
+    -- 2. Copy all rows that our parent had as its parents, but we modify
+    -- the child id in these rows to be the id of currently inserted row,
+    -- and increase depth by one.
+    -- --------------------------------------------------------------------
+    CREATE TRIGGER ai_thread_updates_path_2
+    AFTER INSERT ON thread_updates
+    FOR EACH ROW WHEN NEW.parent_update_id IS NULL
+    BEGIN
+        UPDATE thread_updates
+        SET path = strftime('%Y%j%H%M%S',mtime,'unixepoch')
+            || update_id
+        WHERE update_id = NEW.update_id;
+    END;
+
+- sql: |
+    CREATE TRIGGER ai_thread_updates_path_1
+    AFTER INSERT ON thread_updates
+    FOR EACH ROW WHEN NEW.parent_update_id IS NOT NULL
+    BEGIN
+        UPDATE thread_updates
+        SET path = (
+            SELECT path || '/' || strftime('%Y%j%H%M%S',NEW.mtime,'unixepoch')
+                || update_id
+            FROM thread_updates
+            WHERE update_id = NEW.parent_update_id
+        )
+        WHERE update_id = NEW.update_id;
+    END;
+
+
+
+- sql: |
+    CREATE TRIGGER ai_thread_updates_tree_1
+    AFTER INSERT ON thread_updates
+    FOR EACH ROW
+    BEGIN
+        INSERT INTO thread_updates_tree (parent, child, depth)
+            VALUES (NEW.update_id, NEW.update_id, 0);
+        INSERT INTO thread_updates_tree (parent, child, depth)
+            SELECT x.parent, NEW.update_id, x.depth + 1
+                FROM thread_updates_tree x
+                WHERE x.child = NEW.parent_update_id;
+    END;
+
+- sql: |
+    -- --------------------------------------------------------------------
+    -- UPDATE:
+    --
+    -- Triggers in SQLite are apparently executed LIFO, so you need to read
+    -- these trigger statements from the bottom up.
+    -- --------------------------------------------------------------------
+
+    -- Paths - update all affected rows with the new parent path
+    CREATE TRIGGER au_thread_updates_path_2
+    AFTER UPDATE ON thread_updates
+    FOR EACH ROW WHEN NEW.parent_update_id IS NOT NULL
+    BEGIN
+        UPDATE thread_updates
+        SET path = (
+            SELECT path
+            FROM thread_updates
+            WHERE update_id = NEW.parent_update_id
+        ) || '/' || path
+        WHERE update_id IN (
+            SELECT child
+            FROM thread_updates_tree
+            WHERE parent = NEW.parent_update_id AND depth > 0
+        );
+    END;
+
+
+
+- sql: |
+    -- Finally, insert tree data relating to the new parent
+    CREATE TRIGGER au_thread_updates_tree_5
+    AFTER UPDATE ON thread_updates
+    FOR EACH ROW WHEN NEW.parent_update_id IS NOT NULL
+    BEGIN
+        INSERT INTO thread_updates_tree (parent, child, depth)
+        SELECT r1.parent, r2.child, r1.depth + r2.depth + 1
+        FROM
+            thread_updates_tree r1
+        INNER JOIN
+            thread_updates_tree r2
+        ON
+            r2.parent = NEW.update_id
+        WHERE
+            r1.child = NEW.parent_update_id
+        ;
+    END;
+
+- sql: |
+    -- Remove the tree data relating to the old parent
+    CREATE TRIGGER au_thread_updates_tree_4
+    AFTER UPDATE ON thread_updates
+    FOR EACH ROW WHEN OLD.parent_update_id IS NOT NULL
+    BEGIN
+        DELETE FROM thread_updates_tree WHERE treeid in (
+            SELECT r2.treeid
+            FROM
+                thread_updates_tree r1
+            INNER JOIN
+                thread_updates_tree r2
+            ON
+                r1.child = r2.child AND r2.depth > r1.depth
+            WHERE r1.parent = NEW.update_id
+        );
+    END;
+    -- FIXME: Also trigger when column 'path_from' changes. For the
+    -- moment, the user work-around is to temporarily re-parent the row.
+
+
+
+- sql: |
+    -- path changes - Remove the leading paths of the old parent. This has
+    -- to happen before we make changes to thread_updates_tree.
+    CREATE TRIGGER au_thread_updates_path_1
+    AFTER UPDATE ON thread_updates
+    FOR EACH ROW WHEN OLD.parent_update_id IS NOT NULL
+    BEGIN
+        UPDATE thread_updates
+        SET path = substr(path, (
+            SELECT length(path || '/') + 1
+            FROM thread_updates
+            WHERE update_id = OLD.parent_update_id
+        ))
+        WHERE update_id IN (
+            SELECT child
+            FROM thread_updates_tree
+            WHERE parent = OLD.parent_update_id AND depth > 0
+        );
+    END;
+
+
+
+- sql: |
+    -- If there was no change to the parent then we can skip the rest of
+    -- the triggers
+    CREATE TRIGGER au_thread_updates_tree_2
+    AFTER UPDATE ON thread_updates
+    FOR EACH ROW WHEN
+        (OLD.parent_update_id IS NULL AND NEW.parent_update_id IS NULL) OR
+        ((OLD.parent_update_id IS NOT NULL and NEW.parent_update_id IS NOT NULL) AND
+         (OLD.parent_update_id = NEW.parent_update_id))
+    BEGIN
+        SELECT RAISE (IGNORE);
+    END;
+
+
+
+- sql: |
+    -- If the from_path column has changed then update the path
+    CREATE TRIGGER au_thread_updates_tree_x2
+    AFTER UPDATE ON thread_updates
+    FOR EACH ROW WHEN OLD.mtime != NEW.mtime
+    BEGIN
+        UPDATE thread_updates
+        SET
+            path = (SELECT path FROM thread_updates WHERE update_id = OLD.update_id) ||
+                SUBSTR(path, LENGTH(OLD.path)+1)
+        WHERE
+            update_id IN (
+                SELECT child
+                FROM thread_updates_tree
+                WHERE parent = OLD.update_id AND depth > 0
+            )
+        ;
+    END;
+
+
+
+- sql: |
+    -- If the from_path column has changed then update the path
+    CREATE TRIGGER au_thread_updates_tree_x
+    AFTER UPDATE ON thread_updates
+    FOR EACH ROW WHEN OLD.mtime != NEW.mtime
+    BEGIN
+        UPDATE thread_updates
+        SET path =
+            CASE WHEN
+                NEW.parent_update_id IS NOT NULL
+            THEN
+                (SELECT
+                    path
+                 FROM
+                    thread_updates
+                WHERE
+                    update_id = NEW.parent_update_id
+                ) || '/' || strftime('%Y%j%H%M%S',mtime,'unixepoch')
+                    || update_id
+            ELSE
+                strftime('%Y%j%H%M%S',mtime,'unixepoch') || update_id
+            END
+        WHERE
+            update_id = OLD.update_id
+        ;
+    END;
+
+
+
+- sql: |
+    -- As for moving data around in thread_updates freely, we should forbid
+    -- moves that would create loops:
+    CREATE TRIGGER bu_thread_updates_tree_2
+    BEFORE UPDATE ON thread_updates
+    FOR EACH ROW WHEN NEW.parent_update_id IS NOT NULL AND
+        (SELECT
+            COUNT(child)
+         FROM thread_updates_tree
+         WHERE child = NEW.parent_update_id AND parent = NEW.update_id) > 0
+    BEGIN
+        SELECT RAISE (ABORT,
+            'Update blocked, because it would create loop in tree.');
+    END;
+
+- sql: |
+    -- This implementation forbids changes to the primary key
+    CREATE TRIGGER bu_thread_updates_tree_1
+    BEFORE UPDATE ON thread_updates
+    FOR EACH ROW WHEN OLD.update_id != NEW.update_id
+    BEGIN
+        SELECT RAISE (ABORT, 'Changing ids is forbidden.');
+    END;
+
+- sql: |
+    CREATE TABLE project_defaults (
+        kind VARCHAR(40) NOT NULL,
+        state VARCHAR(40) NOT NULL,
+        status VARCHAR(40) NOT NULL,
+        rank INTEGER NOT NULL,
+        def INTEGER,
+        PRIMARY KEY (kind,state),
+        CHECK (def = 1 OR def IS NULL)
+    );
+
+- sql: |
+    CREATE TRIGGER ai_project_defaults
+        AFTER INSERT ON project_defaults
+    FOR EACH ROW WHEN NEW.def = 1
+    BEGIN
+        UPDATE
+            project_defaults
+        SET
+            def = NULL
+        WHERE
+            kind = NEW.kind AND state != NEW.state AND def = 1
+        ;
+    END;
+
+- sql: |
+    CREATE TRIGGER au_project_defaults
+        AFTER UPDATE ON project_defaults
+    FOR EACH ROW WHEN NEW.def = 1
+    BEGIN
+        UPDATE
+            project_defaults
+        SET
+            def = NULL
+        WHERE
+            kind = NEW.kind AND state != NEW.state AND def = 1
+        ;
+    END;
+
+- sql: |
+    CREATE TABLE project_states (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        kind VARCHAR(40) NOT NULL,
+        status VARCHAR(40) NOT NULL,
+        state VARCHAR(40) NOT NULL,
+        rank INTEGER NOT NULL,
+        def INTEGER,
+        FOREIGN KEY (project_id) REFERENCES threads(id) ON DELETE CASCADE,
+        UNIQUE (project_id,kind,state),
+        CHECK (def = 1 OR def IS NULL)
+    );
+
+- sql: |
+    CREATE TRIGGER ai_project_states
+        AFTER INSERT ON project_states
+    FOR EACH ROW WHEN NEW.def = 1
+    BEGIN
+        UPDATE
+            project_states
+        SET
+            def = NULL
+        WHERE
+            project_id = NEW.project_id AND
+            kind = NEW.kind AND
+            state != NEW.state AND
+            def = 1
+        ;
+    END;
+
+- sql: |
+    CREATE TRIGGER au_project_states
+        AFTER UPDATE ON project_states
+    FOR EACH ROW WHEN NEW.def = 1
+    BEGIN
+        UPDATE
+            project_states
+        SET
+            def = NULL
+        WHERE
+            project_id = NEW.project_id AND
+            kind = NEW.kind AND
+            state != NEW.state AND
+            def = 1
+        ;
+    END;
+
+- sql: |
+    CREATE TABLE projects (
+        id INTEGER PRIMARY KEY NOT NULL,
+        name VARCHAR(40) NOT NULL,
+        parent_id INTEGER,
+        phase_id INTEGER NOT NULL,
+        path VARCHAR collate nocase UNIQUE,
+        hash VARCHAR,
+        FOREIGN KEY(id) REFERENCES threads(id)
+            ON DELETE CASCADE,
+        FOREIGN KEY(parent_id) REFERENCES projects(id)
+            ON DELETE CASCADE,
+        FOREIGN KEY(phase_id) REFERENCES project_states(id)
+    );
+
+- sql: |
+    CREATE TRIGGER bi_projects BEFORE INSERT ON projects
+    FOR EACH ROW
+    BEGIN
+        SELECT
+            RAISE(ABORT,'project_threads.state_id/project_id mismatch')
+        FROM
+            project_states
+        WHERE
+            id = NEW.phase_id AND project_id != NEW.id
+        ;
+    END;
+
+- sql: |
+    CREATE TRIGGER bu_projects BEFORE UPDATE ON projects
+    FOR EACH ROW
+    BEGIN
+        SELECT
+            RAISE(ABORT,'project_threads.state_id/project_id mismatch')
+        FROM
+            project_states
+        WHERE
+            id = NEW.phase_id AND project_id != NEW.id
+        ;
+    END;
+
+- sql: |
+    CREATE TABLE projects_tree (
+        treeid    INTEGER PRIMARY KEY,
+        parent    INTEGER NOT NULL REFERENCES projects(id)
+            ON DELETE CASCADE,
+        child     INTEGER NOT NULL REFERENCES projects(id)
+            ON DELETE CASCADE,
+        depth     INTEGER NOT NULL,
+        UNIQUE (parent, child)
+    );
+
+- sql: |
+    CREATE INDEX projects_tree_parent_child
+        ON projects_tree(parent,child);
+
+- sql: |
+    CREATE TRIGGER bd_projects_tree
+    BEFORE DELETE on projects_tree
+    FOR EACH ROW
+    BEGIN
+        DELETE FROM
+            threads
+        WHERE
+            id IN (
+                SELECT
+                    child
+                FROM
+                    projects_tree
+                WHERE
+                    parent = OLD.parent AND depth = OLD.depth + 1
+            )
+        ;
+    END;
 
 - sql: |
     -- --------------------------------------------------------------------
@@ -119,35 +575,38 @@ __DATA__
     -- the child id in these rows to be the id of currently inserted row,
     -- and increase depth by one.
     -- --------------------------------------------------------------------
-    CREATE TRIGGER ai_projects_path_2 AFTER INSERT ON projects
+    CREATE TRIGGER ai_projects_path_2
+    AFTER INSERT ON projects
     FOR EACH ROW WHEN NEW.parent_id IS NULL
     BEGIN
         UPDATE projects
         SET path = name
-        WHERE project_id = NEW.project_id;
+        WHERE id = NEW.id;
     END;
 
 - sql: |
-    CREATE TRIGGER ai_projects_path_1 AFTER INSERT ON projects
+    CREATE TRIGGER ai_projects_path_1
+    AFTER INSERT ON projects
     FOR EACH ROW WHEN NEW.parent_id IS NOT NULL
     BEGIN
         UPDATE projects
         SET path = (
             SELECT path || '/' || NEW.name
             FROM projects
-            WHERE project_id = NEW.parent_id
+            WHERE id = NEW.parent_id
         )
-        WHERE project_id = NEW.project_id;
+        WHERE id = NEW.id;
     END;
 
 - sql: |
-    CREATE TRIGGER ai_projects_tree_1 AFTER INSERT ON projects
-    FOR EACH ROW 
+    CREATE TRIGGER ai_projects_tree_1
+    AFTER INSERT ON projects
+    FOR EACH ROW
     BEGIN
         INSERT INTO projects_tree (parent, child, depth)
-            VALUES (NEW.project_id, NEW.project_id, 0);
+            VALUES (NEW.id, NEW.id, 0);
         INSERT INTO projects_tree (parent, child, depth)
-            SELECT x.parent, NEW.project_id, x.depth + 1
+            SELECT x.parent, NEW.id, x.depth + 1
                 FROM projects_tree x
                 WHERE x.child = NEW.parent_id;
     END;
@@ -159,16 +618,17 @@ __DATA__
     -- Triggers in SQLite are apparently executed LIFO, so you need to read
     -- these trigger statements from the bottom up.
     -- --------------------------------------------------------------------
-    CREATE TRIGGER au_projects_path_2 AFTER UPDATE ON projects
+    CREATE TRIGGER au_projects_path_2
+    AFTER UPDATE ON projects
     FOR EACH ROW WHEN NEW.parent_id IS NOT NULL
     BEGIN
         UPDATE projects
         SET path = (
             SELECT path
             FROM projects
-            WHERE project_id = NEW.parent_id
+            WHERE id = NEW.parent_id
         ) || '/' || path
-        WHERE project_id IN (
+        WHERE id IN (
             SELECT child
             FROM projects_tree
             WHERE parent = NEW.parent_id AND depth > 0
@@ -176,7 +636,8 @@ __DATA__
     END;
 
 - sql: |
-    CREATE TRIGGER au_projects_tree_5 AFTER UPDATE ON projects
+    CREATE TRIGGER au_projects_tree_5
+    AFTER UPDATE ON projects
     FOR EACH ROW WHEN NEW.parent_id IS NOT NULL
     BEGIN
         INSERT INTO projects_tree (parent, child, depth)
@@ -186,14 +647,15 @@ __DATA__
         INNER JOIN
             projects_tree r2
         ON
-            r2.parent = NEW.project_id
+            r2.parent = NEW.id
         WHERE
             r1.child = NEW.parent_id
         ;
     END;
 
 - sql: |
-    CREATE TRIGGER au_projects_tree_4 AFTER UPDATE ON projects
+    CREATE TRIGGER au_projects_tree_4
+    AFTER UPDATE ON projects
     FOR EACH ROW WHEN OLD.parent_id IS NOT NULL
     BEGIN
         DELETE FROM projects_tree WHERE treeid in (
@@ -204,23 +666,24 @@ __DATA__
                 projects_tree r2
             ON
                 r1.child = r2.child AND r2.depth > r1.depth
-            WHERE r1.parent = NEW.project_id
+            WHERE r1.parent = NEW.id
         );
     END;
 
 - sql: |
     -- FIXME: Also trigger when column 'path_from' changes. For the
     -- moment, the user work-around is to temporarily re-parent the row.
-    CREATE TRIGGER au_projects_path_1 AFTER UPDATE ON projects
+    CREATE TRIGGER au_projects_path_1
+    AFTER UPDATE ON projects
     FOR EACH ROW WHEN OLD.parent_id IS NOT NULL
     BEGIN
         UPDATE projects
         SET path = substr(path, (
             SELECT length(path || '/') + 1
             FROM projects
-            WHERE project_id = OLD.parent_id
+            WHERE id = OLD.parent_id
         ))
-        WHERE project_id IN (
+        WHERE id IN (
             SELECT child
             FROM projects_tree
             WHERE parent = OLD.parent_id AND depth > 0
@@ -228,7 +691,8 @@ __DATA__
     END;
 
 - sql: |
-    CREATE TRIGGER au_projects_tree_2 AFTER UPDATE ON projects
+    CREATE TRIGGER au_projects_tree_2
+    AFTER UPDATE ON projects
     FOR EACH ROW WHEN
         (OLD.parent_id IS NULL AND NEW.parent_id IS NULL) OR
         ((OLD.parent_id IS NOT NULL and NEW.parent_id IS NOT NULL) AND
@@ -239,273 +703,125 @@ __DATA__
 
 - sql: |
     -- If the from_path column has changed then update the path
-    CREATE TRIGGER au_projects_tree_x2 AFTER UPDATE ON projects
+    CREATE TRIGGER au_projects_tree_x2
+    AFTER UPDATE ON projects
     FOR EACH ROW WHEN OLD.name != NEW.name
     BEGIN
         UPDATE projects
         SET
-            path = (SELECT path FROM projects WHERE project_id = OLD.project_id) ||
+            path = (SELECT path FROM projects WHERE id = OLD.id) ||
                 SUBSTR(path, LENGTH(OLD.path)+1)
         WHERE
-            project_id IN (
+            id IN (
                 SELECT child
                 FROM projects_tree
-                WHERE parent = OLD.project_id AND depth > 0
+                WHERE parent = OLD.id AND depth > 0
             )
         ;
     END;
 
 - sql: |
     -- If the from_path column has changed then update the path
-    CREATE TRIGGER au_projects_tree_x AFTER UPDATE ON projects
+    CREATE TRIGGER au_projects_tree_x
+    AFTER UPDATE ON projects
     FOR EACH ROW WHEN OLD.name != NEW.name
     BEGIN
         UPDATE projects
-        SET path = 
+        SET path =
             CASE WHEN
                 NEW.parent_id IS NOT NULL
             THEN
-                (SELECT path FROM projects WHERE project_id = NEW.parent_id) || '/' ||
+                (SELECT path FROM projects WHERE id = NEW.parent_id) || '/' ||
                 name
             ELSE
                 name
             END
         WHERE
-            project_id = OLD.project_id
+            id = OLD.id
         ;
     END;
 
 - sql: |
-    CREATE TRIGGER bu_projects_tree_2 BEFORE UPDATE ON projects
+    CREATE TRIGGER bu_projects_tree_2
+    BEFORE UPDATE ON projects
     FOR EACH ROW WHEN NEW.parent_id IS NOT NULL AND
         (SELECT
             COUNT(child)
          FROM projects_tree
-         WHERE child = NEW.parent_id AND parent = NEW.project_id) > 0
+         WHERE child = NEW.parent_id AND parent = NEW.id) > 0
     BEGIN
         SELECT RAISE (ABORT,
             'Update blocked, because it would create loop in tree.');
     END;
 
 - sql: |
-    CREATE TRIGGER bu_projects_tree_1 BEFORE UPDATE ON projects
-    FOR EACH ROW WHEN OLD.project_id != NEW.project_id
+    CREATE TRIGGER bu_projects_tree_1
+    BEFORE UPDATE ON projects
+    FOR EACH ROW WHEN OLD.id != NEW.id
     BEGIN
         SELECT RAISE (ABORT, 'Changing ids is forbidden.');
     END;
 
 - sql: |
     CREATE TABLE project_updates (
-      project_update_id INTEGER PRIMARY KEY NOT NULL,
-      name varchar(40),
-      parent_id integer,
-      phase varchar(40),
-      pref_id integer,
-      ref_uuid varchar(36),
-      project_id integer NOT NULL,
-      path varchar,
-      FOREIGN KEY(phase) REFERENCES project_phases(phase),
-      FOREIGN KEY(project_update_id) REFERENCES thread_updates(thread_update_id),
-      FOREIGN KEY(project_id) REFERENCES projects(project_id)
+        update_id INTEGER PRIMARY KEY NOT NULL,
+        project_id INTEGER NOT NULL,
+        parent_id INTEGER,
+        name VARCHAR(40),
+        phase_id INTEGER,
+        add_kind VARCHAR(40),
+        add_state VARCHAR(40),
+        add_status VARCHAR(40),
+        add_rank INTEGER,
+        add_def INTEGER,
+        FOREIGN KEY(update_id) REFERENCES
+            thread_updates(update_id)
+            ON DELETE CASCADE,
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+            ON DELETE CASCADE,
+        FOREIGN KEY(phase_id) REFERENCES project_states(id),
+        CHECK (
+            (add_kind IS NOT NULL AND
+             add_rank IS NOT NULL AND
+             add_status IS NOT NULL AND
+             add_state IS NOT NULL)
+             OR
+            (add_kind IS NULL AND
+             add_rank IS NULL AND
+             add_status IS NULL AND
+             add_state IS NULL)
+        )
     );
 
 - sql: |
-    CREATE TABLE issue_status_types (
-      status varchar(40) NOT NULL,
-      progress varchar(40) NOT NULL,
-      rank integer NOT NULL,
-      PRIMARY KEY (status)
-    );
-
-- sql: |
-    CREATE TABLE issues (
-      issue_id INTEGER PRIMARY KEY NOT NULL,
-      status varchar(40) NOT NULL DEFAULT 'open',
-      FOREIGN KEY(status) REFERENCES issue_status_types(status),
-      FOREIGN KEY(issue_id) REFERENCES threads(thread_id)
-    );
-
-- sql: |
-    CREATE TABLE issue_updates (
-      issue_update_id INTEGER PRIMARY KEY NOT NULL,
-      issue_id integer NOT NULL,
-      status varchar(40),
-      project_id integer REFERENCES projects(project_id),
-      rm_project_id integer REFERENCES projects(project_id),
-      FOREIGN KEY(status) REFERENCES issue_status_types(status),
-      FOREIGN KEY(issue_id) REFERENCES issues(issue_id),
-      FOREIGN KEY(issue_update_id) REFERENCES thread_updates(thread_update_id)
-    );
-
-- sql: |
-    CREATE TABLE task_status_types (
-      status varchar(40) NOT NULL,
-      progress varchar(40) NOT NULL,
-      rank integer NOT NULL,
-      PRIMARY KEY (status)
-    );
-
-- sql: |
-    CREATE TABLE tasks (
-      task_id INTEGER PRIMARY KEY NOT NULL,
-      status varchar(40) NOT NULL DEFAULT 'open',
-      FOREIGN KEY(status) REFERENCES task_status_types(status),
-      FOREIGN KEY(task_id) REFERENCES threads(thread_id)
-    );
-
-- sql: |
-    CREATE TABLE task_updates (
-      task_update_id INTEGER PRIMARY KEY NOT NULL,
-      task_id integer NOT NULL,
-      status varchar(40),
-      project_id integer REFERENCES projects(project_id),
-      rm_project_id integer REFERENCES projects(project_id),
-      FOREIGN KEY(status) REFERENCES task_status_types(status),
-      FOREIGN KEY(task_id) REFERENCES tasks(task_id),
-      FOREIGN KEY(task_update_id) REFERENCES thread_updates(thread_update_id)
-    );
-
-- sql: |
-    CREATE TABLE project_threads (
-      project_id integer NOT NULL REFERENCES projects(project_id),
-      project_self integer REFERENCES projects(project_id),
-      issue_id integer REFERENCES issues(issue_id),
-      task_id integer REFERENCES tasks(task_id),
-      thread_update_id integer NOT NULL 
-        REFERENCES thread_updates(thread_update_id),
-      UNIQUE (project_id, issue_id),
-      UNIQUE (project_id, task_id),
-      CHECK (
-        (project_self IS NULL AND issue_id IS NULL AND task_id IS NOT NULL) OR
-        (project_self IS NULL AND issue_id IS NOT NULL AND task_id IS NULL) OR
-        (project_self IS NOT NULL AND issue_id IS NULL AND task_id IS NULL)
-      )
-    );
-
-- sql: |
-    CREATE TABLE hubs (
-      name varchar(40) PRIMARY KEY NOT NULL,
-      location varchar(255) NOT NULL,
-      master integer
-    );
-
-- sql: |
-    CREATE UNIQUE INDEX unique_hubs_name ON hubs (name);
-
-- perl: $self->create_sequence("threads")
-
-- perl: $self->create_sequence("thread_updates")
-
-- sql: |
-    INSERT INTO project_phases(phase,rank) VALUES('define',10);
-
-- sql: |
-    INSERT INTO project_phases(phase,rank) VALUES('plan',20);
-
-- sql: |
-    INSERT INTO project_phases(phase,rank) VALUES('run',30);
-
-- sql: |
-    INSERT INTO project_phases(phase,rank) VALUES('eval',40);
-
-- sql: |
-    INSERT INTO project_phases(phase,rank) VALUES('closed',50);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('active','open',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('stalled','needinfo',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('stalled','depends',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('resolved','testing',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('resolved','fixed',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('closed','duplicate',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('closed','wontfix',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('closed','noissue',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('closed','norepeat',10);
-
-- sql: |
-    INSERT INTO task_status_types(progress,status,rank)
-    VALUES('active','open',10);
-
-- sql: |
-    INSERT INTO task_status_types(progress,status,rank)
-    VALUES('stalled','needinfo',10);
-
-- sql: |
-    INSERT INTO task_status_types(progress,status,rank)
-    VALUES('stalled','depends',10);
-
-- sql: |
-    INSERT INTO task_status_types(progress,status,rank)
-    VALUES('closed','done',10);
-
-- sql: |
-    INSERT INTO issue_status_types(progress,status,rank)
-    VALUES('closed','notask',10);
-
-- sql: |
-    CREATE TRIGGER ai_thread_updates AFTER INSERT ON thread_updates
-    FOR EACH ROW
-    BEGIN
-        UPDATE thread_updates
-        SET
-            s0 = substr(NEW.thread_update_uuid,1,1),
-            s1 = substr(NEW.thread_update_uuid,1,2),
-            s2 = substr(NEW.thread_update_uuid,1,3),
-            s3 = substr(NEW.thread_update_uuid,1,4),
-            s4 = substr(NEW.thread_update_uuid,1,5)
-        WHERE thread_update_id = NEW.thread_update_id;
-    END;
-
-- sql: |
-    CREATE TRIGGER ai_thread_updates2 AFTER INSERT ON thread_updates
-    FOR EACH ROW
-    BEGIN
-        UPDATE threads
-        SET
-            title = (
-                SELECT
-                    title
-                FROM
-                    thread_updates
-                WHERE
-                    thread_id = NEW.thread_id AND title IS NOT NULL
-                ORDER BY
-                    thread_update_id DESC
-                LIMIT 1
-            )
+    CREATE TRIGGER ai_project_updates2
+    AFTER INSERT ON project_updates
+    FOR EACH ROW WHEN NOT EXISTS (
+        SELECT
+            1
+        FROM
+            project_threads
         WHERE
-            thread_id = NEW.thread_id
+            project_id = NEW.project_id AND thread_id = NEW.project_id
+        )
+    BEGIN
+        INSERT INTO project_threads(
+            project_id,
+            thread_id,
+            state_id
+        )
+        VALUES(
+            NEW.project_id,
+            NEW.project_id,
+            NEW.phase_id
+        )
         ;
     END;
 
 - sql: |
-    CREATE TRIGGER ai_project_updates AFTER INSERT ON project_updates
-    FOR EACH ROW
+    CREATE TRIGGER ai_project_updates
+    AFTER INSERT ON project_updates
+    FOR EACH ROW WHEN NEW.name IS NOT NULL OR NEW.phase_id IS NOT NULL
     BEGIN
         UPDATE projects
         SET
@@ -514,70 +830,1419 @@ __DATA__
                     name
                 FROM
                     project_updates
+                INNER JOIN
+                    thread_updates
+                ON
+                    thread_updates.update_id = project_updates.update_id
                 WHERE
                     project_id = NEW.project_id AND name IS NOT NULL
                 ORDER BY
-                    project_update_id DESC
+                    mtime DESC, project_updates.update_id DESC
                 LIMIT 1
             ),
-            phase = (
+            phase_id = (
                 SELECT
-                    phase
+                    phase_id
                 FROM
                     project_updates
+                INNER JOIN
+                    thread_updates
+                ON
+                    thread_updates.update_id = project_updates.update_id
                 WHERE
-                    project_id = NEW.project_id AND phase IS NOT NULL
+                    project_id = NEW.project_id AND phase_id IS NOT NULL
                 ORDER BY
-                    project_update_id DESC
+                    mtime DESC, project_updates.update_id DESC
                 LIMIT 1
             )
         WHERE
-            project_id = NEW.project_id
+            id = NEW.project_id
         ;
     END;
 
 - sql: |
-    CREATE TRIGGER ai_task_updates AFTER INSERT ON task_updates
+    CREATE TABLE project_tree_prefix (
+        project_id INTEGER,
+        slot VARCHAR NOT NULL,
+        hash VARCHAR NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+            ON DELETE CASCADE,
+        UNIQUE(project_id,slot)
+    );
+
+- sql: |
+    CREATE VIEW func_update_project_tree_prefix AS
+    SELECT
+        1 AS project_id,
+        1 AS s0,
+        1 AS s1,
+        1 AS s2,
+        1 AS s3,
+        1 AS s4
+    ;
+
+- sql: |
+    CREATE TRIGGER func_update_project_tree_prefix
+    INSTEAD OF INSERT ON func_update_project_tree_prefix
     FOR EACH ROW
     BEGIN
-        UPDATE tasks
+        --select debug('SELECT
+        --    ?, project_id,slot,hash
+        --FROM
+        --    project_tree_prefix
+        --WHERE
+        --    project_id = ? AND
+        --    slot IN(?,?,?,?,? )
+        --ORDER BY
+        --    slot
+        --;', 'start',NEW.project_id,
+        --    NEW.s0,
+        --    NEW.s0 || NEW.s1,
+        --    NEW.s0 || NEW.s1 || NEW.s2,
+        --    NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3,
+        --    NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3 || NEW.s4);
+
+        DELETE FROM
+            project_tree_prefix
+        WHERE
+            project_id = NEW.project_id AND
+            slot IN (
+                NEW.s0,
+                NEW.s0 || NEW.s1,
+                NEW.s0 || NEW.s1 || NEW.s2,
+                NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3,
+                NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3 || NEW.s4
+            )
+        ;
+
+        INSERT INTO
+            project_tree_prefix(project_id,slot,hash)
+        SELECT
+            NEW.project_id,
+            NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3 || NEW.s4,
+            substr(agg_sha1_hex(update_uuid),1,8)
+        FROM
+            (SELECT
+                thread_updates.update_uuid AS update_uuid
+            FROM
+                thread_updates
+            INNER JOIN
+                project_threads
+            ON
+                thread_updates.thread_id = project_threads.thread_id
+            INNER JOIN
+                projects_tree
+            ON
+                projects_tree.child = project_threads.project_id AND
+                projects_tree.parent = NEW.project_id
+            WHERE
+                thread_updates.slots
+                    = NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3 || NEW.s4
+            ORDER BY
+                thread_updates.update_uuid
+            )
+        GROUP BY
+            NEW.project_id,NEW.s0||NEW.s1||NEW.s2||NEW.s3||NEW.s4
+        ;
+
+        INSERT INTO project_tree_prefix(project_id,slot,hash)
+        SELECT
+            NEW.project_id,
+            NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3,
+            substr(agg_sha1_hex(hash),1,8)
+        FROM
+            (SELECT
+                hash
+            FROM
+                project_tree_prefix
+            WHERE
+                project_id = NEW.project_id AND
+                slot LIKE NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3 || '_'
+            ORDER BY
+                slot
+            )
+        GROUP BY
+            NEW.project_id,NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3
+        ;
+
+        INSERT INTO project_tree_prefix(project_id,slot,hash)
+        SELECT
+            NEW.project_id,
+            NEW.s0 || NEW.s1 || NEW.s2,
+            substr(agg_sha1_hex(hash),1,8)
+        FROM
+            (SELECT
+                hash
+            FROM
+                project_tree_prefix
+            WHERE
+                project_id = NEW.project_id AND
+                slot LIKE NEW.s0 || NEW.s1 || NEW.s2 || '_'
+            ORDER BY
+                slot
+            )
+        GROUP BY
+            NEW.project_id,NEW.s0 || NEW.s1 || NEW.s2
+        ;
+
+        INSERT INTO project_tree_prefix(project_id,slot,hash)
+        SELECT
+            NEW.project_id,
+            NEW.s0 || NEW.s1,
+            substr(agg_sha1_hex(hash),1,8)
+        FROM
+            (SELECT
+                hash
+            FROM
+                project_tree_prefix
+            WHERE
+                project_id = NEW.project_id AND
+                slot LIKE NEW.s0 || NEW.s1 || '_'
+            ORDER BY
+                slot
+            )
+        GROUP BY
+            NEW.project_id,NEW.s0 || NEW.s1
+        ;
+
+        INSERT INTO project_tree_prefix(project_id,slot,hash)
+        SELECT
+            NEW.project_id,
+            NEW.s0,
+            substr(agg_sha1_hex(hash),1,8)
+        FROM
+            (SELECT
+                hash
+            FROM
+                project_tree_prefix
+            WHERE
+                project_id = NEW.project_id AND
+                slot LIKE NEW.s0 || '_'
+            ORDER BY
+                slot
+            )
+        GROUP BY
+            NEW.project_id,NEW.s0
+        ;
+
+        ----select debug('select * from project_tree_prefix where
+        --project_id = ? and slot = ?', NEW.project_id, NEW.s0);
+        UPDATE
+            projects
         SET
-            status =
+            hash = (
+                SELECT
+                    substr(agg_sha1_hex(hash),1,8)
+                FROM
+                    (SELECT
+                          hash
+                    FROM
+                        project_tree_prefix
+                    WHERE
+                        project_id = NEW.project_id AND
+                        slot LIKE '_'
+                    ORDER BY
+                        slot
+                    )
+                GROUP BY
+                    NULL
+            )
+        WHERE
+            id = NEW.project_id
+        ;
+
+        --select debug('SELECT
+        --    ?, project_id,slot,hash
+        --FROM
+        --    project_tree_prefix
+        --WHERE
+        --    project_id = ? AND
+        --    slot IN(?,?,?,?,? )
+        --ORDER BY
+        --    slot
+        --;', 'final',NEW.project_id,
+        --    NEW.s0,
+        --    NEW.s0 || NEW.s1,
+        --    NEW.s0 || NEW.s1 || NEW.s2,
+        --    NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3,
+        --    NEW.s0 || NEW.s1 || NEW.s2 || NEW.s3 || NEW.s4);
+
+    END;
+
+- sql: |
+    CREATE TRIGGER func_update_project_tree_prefix0
+    INSTEAD OF INSERT ON func_update_project_tree_prefix
+    FOR EACH ROW WHEN
+        NEW.s0 IS NULL OR
+        NEW.s1 IS NULL OR
+        NEW.s2 IS NULL OR
+        NEW.s3 IS NULL OR
+        NEW.s4 IS NULL
+    BEGIN
+        SELECT RAISE(ABORT, 'func_update_project_tree_prefix takes no NULLs');
+    END;
+
+- sql: |
+    CREATE TABLE project_threads (
+        project_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL,
+        state_id INTEGER NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY(state_id) REFERENCES project_states(id),
+        UNIQUE (project_id, thread_id)
+    );
+
+- sql: |
+    CREATE TRIGGER bi_project_threads BEFORE INSERT ON project_threads
+    FOR EACH ROW
+    BEGIN
+        SELECT
+            RAISE(ABORT,'project_threads.state_id/project_id mismatch')
+        FROM
+            project_states
+        WHERE
+            id = NEW.state_id AND project_id != NEW.project_id
+        ;
+    END;
+
+- sql: |
+    CREATE TRIGGER bu_project_threads BEFORE UPDATE ON project_threads
+    FOR EACH ROW
+    BEGIN
+        SELECT
+            RAISE(ABORT,'project_threads.state_id/project_id mismatch')
+        FROM
+            project_states
+        WHERE
+            id = NEW.state_id AND project_id != NEW.project_id
+        ;
+    END;
+
+# Remove threads that are not attached to any projects
+# TODO fix up project tree_prefix
+- sql: |
+    CREATE TRIGGER ad_project_threads AFTER DELETE ON project_threads
+    FOR EACH ROW WHEN
+        (SELECT
+            COUNT(thread_id)
+         FROM
+            project_threads
+         WHERE
+            thread_id = OLD.thread_id) = 0
+    BEGIN
+        DELETE FROM
+            threads
+        WHERE
+            id = OLD.thread_id
+        ;
+    END;
+
+- sql: |
+    CREATE TABLE tasks (
+        id INTEGER PRIMARY KEY NOT NULL,
+        FOREIGN KEY(id) REFERENCES threads(id)
+            ON DELETE CASCADE
+    );
+
+- sql: |
+    CREATE TABLE issues (
+      id INTEGER PRIMARY KEY NOT NULL,
+      FOREIGN KEY(id) REFERENCES threads(id)
+            ON DELETE CASCADE
+    );
+
+- sql: |
+    CREATE TABLE task_updates (
+        update_id INTEGER PRIMARY KEY NOT NULL,
+        task_id INTEGER NOT NULL,
+        state_id INTEGER,
+        FOREIGN KEY(update_id) REFERENCES thread_updates(update_id)
+            ON DELETE CASCADE
+        FOREIGN KEY(task_id) REFERENCES tasks(id)
+            ON DELETE CASCADE,
+        FOREIGN KEY(state_id) REFERENCES project_states(id)
+            ON DELETE SET NULL
+    );
+
+- sql: |
+    CREATE TRIGGER ai_task_updates3
+    AFTER INSERT ON task_updates
+    FOR EACH ROW
+    BEGIN
+        INSERT INTO
+            func_update_project_tree_prefix(project_id,slots)
+        SELECT
+            projects_tree.parent,
+            thread_updates.slots
+        FROM
+            thread_updates
+        INNER JOIN
+            project_threads
+        ON
+            project_threads.task_id = NEW.task_id
+        INNER JOIN
+            projects_tree
+        ON
+            projects_tree.child = project_threads.project_id
+        WHERE
+            thread_updates.update_id = NEW.update_id
+        ;
+
+    END;
+
+- sql: |
+    CREATE TRIGGER ai_task_updates2
+    AFTER INSERT ON task_updates
+    FOR EACH ROW
+    WHEN
+        NEW.state IS NOT NULL AND NOT EXISTS (
+            SELECT
+                1
+            FROM
+                project_threads
+            WHERE
+                project_id = NEW.project_id AND task_id = NEW.task_id
+        )
+    BEGIN
+        INSERT INTO project_threads(
+            project_id,
+            task_id,
+            task_state
+        )
+        VALUES(
+            NEW.project_id,
+            NEW.task_id,
+            NEW.state
+        )
+        ;
+    END;
+
+- sql: |
+    CREATE TRIGGER ai_task_updates
+    AFTER INSERT ON task_updates
+    FOR EACH ROW
+    WHEN
+        NEW.state IS NOT NULL AND EXISTS (
+            SELECT
+                1
+            FROM
+                project_threads
+            WHERE
+                project_id = NEW.project_id AND task_id = NEW.task_id
+        )
+    BEGIN
+        UPDATE project_threads
+        SET
+            task_state =
                 (SELECT
-                    status
+                    state
                 FROM
                     task_updates
                 WHERE
-                    task_id = NEW.task_id AND status IS NOT NULL
+                    task_id = NEW.task_id
+                AND
+                    project_id = NEW.project_id
+                AND
+                    state IS NOT NULL
                 ORDER BY
-                    task_update_id DESC
+                    update_id DESC
                 LIMIT 1
                 )
         WHERE
-            task_id = NEW.task_id
+            task_id = NEW.task_id AND project_id = NEW.project_id
         ;
     END;
 
 - sql: |
-    CREATE TRIGGER ai_issue_updates AFTER INSERT ON issue_updates
+    CREATE VIEW func_task_updates AS
+        SELECT
+            1 AS update_id,
+            1 AS task_id,
+            1 AS project_id,
+            1 AS project_uuid,
+            1 AS state
+    ;
+
+- sql: |
+    CREATE TRIGGER func_task_updates1
+    INSTEAD OF INSERT ON func_task_updates
+    FOR EACH ROW WHEN
+        NEW.project_uuid IS NOT NULL
+    BEGIN
+        INSERT INTO
+            task_updates(update_id,task_id,state,project_id)
+        VALUES(NEW.update_id,NEW.task_id,NEW.state, (
+            SELECT
+                id
+            FROM
+                threads
+            WHERE
+                thread_type = 'project' AND uuid = NEW.project_uuid
+            )
+        );
+    END;
+
+- sql: |
+    CREATE TRIGGER func_task_updates0
+    INSTEAD OF INSERT ON func_task_updates
+    FOR EACH ROW WHEN
+        NEW.project_id IS NOT NULL
+    BEGIN
+        INSERT INTO
+            task_updates(update_id,task_id,state,project_id)
+        VALUES(
+            NEW.update_id,NEW.task_id,NEW.state,NEW.project_id
+        );
+    END;
+
+- sql: |
+    CREATE TABLE issue_updates (
+        update_id INTEGER PRIMARY KEY NOT NULL,
+        issue_id INTEGER NOT NULL,
+        state_id INTEGER,
+        FOREIGN KEY(update_id) REFERENCES thread_updates(update_id)
+            ON DELETE CASCADE,
+        FOREIGN KEY(issue_id) REFERENCES issues(id)
+            ON DELETE CASCADE,
+        FOREIGN KEY(state_id) REFERENCES project_states(id)
+            ON DELETE SET NULL
+    );
+
+- sql: |
+    CREATE TRIGGER ai_issue_updates3
+    AFTER INSERT ON issue_updates
     FOR EACH ROW
     BEGIN
-        UPDATE issues
-        SET
-            status =
-                (SELECT
-                    status
-                FROM
-                    issue_updates
-                WHERE
-                    issue_id = NEW.issue_id AND status IS NOT NULL
-                ORDER BY
-                    issue_update_id DESC
-                LIMIT 1
-                )
+        INSERT INTO
+            func_update_project_tree_prefix(project_id,slots)
+        SELECT
+            projects_tree.parent,
+            thread_updates.slots
+        FROM
+            thread_updates
+        INNER JOIN
+            project_threads
+        ON
+            project_threads.issue_id = NEW.issue_id
+        INNER JOIN
+            projects_tree
+        ON
+            projects_tree.child = project_threads.project_id
         WHERE
-            issue_id = NEW.issue_id
+            thread_updates.update_id = NEW.update_id
         ;
 
     END;
 
+- sql: |
+    CREATE TRIGGER ai_issue_updates2
+    AFTER INSERT ON issue_updates
+    FOR EACH ROW
+    WHEN
+        NEW.state IS NOT NULL AND NOT EXISTS (
+            SELECT
+                1
+            FROM
+                project_threads
+            WHERE
+                project_id = NEW.project_id AND issue_id = NEW.issue_id
+        )
+    BEGIN
+        INSERT INTO project_threads(
+            project_id,
+            issue_id,
+            issue_state
+        )
+        VALUES(
+            NEW.project_id,
+            NEW.issue_id,
+            NEW.state
+        )
+        ;
+    END;
+
+- sql: |
+    CREATE TRIGGER ai_issue_updates
+    AFTER INSERT ON issue_updates
+    FOR EACH ROW
+    WHEN
+        NEW.state IS NOT NULL AND EXISTS (
+            SELECT
+                1
+            FROM
+                project_threads
+            WHERE
+                project_id = NEW.project_id AND issue_id = NEW.issue_id
+        )
+    BEGIN
+        UPDATE project_threads
+        SET
+            issue_state = (
+                SELECT
+                    state
+                FROM
+                    issue_updates
+                INNER JOIN
+                    thread_updates
+                ON
+                    thread_updates.update_id = issue_updates.update_id
+                WHERE
+                    issue_id = NEW.issue_id AND
+                    project_id = NEW.project_id AND
+                    state IS NOT NULL
+                ORDER BY
+                    mtime DESC, issue_updates.update_id DESC
+                LIMIT 1
+            )
+        WHERE
+            issue_id = NEW.issue_id AND project_id = NEW.project_id
+        ;
+    END;
+
+- sql: |
+    CREATE TABLE hubs (
+        id INTEGER NOT NULL PRIMARY KEY,
+        alias VARCHAR NOT NULL UNIQUE,
+        location VARCHAR NOT NULL UNIQUE,
+        FOREIGN KEY (id) REFERENCES threads(id) ON DELETE CASCADE
+    );
+
+- sql: |
+    CREATE TABLE hub_threads (
+        id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+        hub_id INTEGER NOT NULL REFERENCES hubs(id) ON DELETE CASCADE,
+        thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+        UNIQUE (hub_id, thread_id) ON CONFLICT IGNORE
+    );
+
+- sql: |
+    CREATE TRIGGER bd_projects
+    BEFORE DELETE ON projects
+    FOR EACH ROW
+    BEGIN
+        DELETE FROM
+            project_threads
+        WHERE
+            project_id = OLD.id
+        ;
+    END;
+
+- sql: |
+    CREATE VIEW func_import_thread_update AS
+        SELECT
+            1 AS update_uuid,
+            1 AS mtime,
+            1 AS author,
+            1 AS email,
+            1 AS id,
+            1 AS uuid,
+            1 AS parent_id,
+            1 AS parent_uuid,
+            1 AS name,
+            1 AS title,
+            1 AS comment,
+            1 AS s0,
+            1 AS s1,
+            1 AS s2,
+            1 AS s3,
+            1 AS s4
+    ;
+
+- sql: |
+    CREATE TRIGGER func_import_thread_update
+    INSTEAD OF INSERT ON func_import_thread_update
+    FOR EACH ROW
+    BEGIN
+        INSERT INTO
+            thread_updates(
+                update_uuid,
+                thread_id,
+                parent_id,
+                mtime,
+                author,
+                email,
+                title,
+                comment,
+                s0,
+                s1,
+                s2,
+                s3,
+                s4
+            )
+        VALUES (
+            (SELECT update_uuid FROM current_update),
+            -- thread_id
+            CASE WHEN
+                NEW.id IS NOT NULL
+            THEN
+                NEW.id
+            WHEN
+                NEW.uuid IS NOT NULL
+            THEN
+                (SELECT
+                    id
+                FROM
+                    threads
+                WHERE
+                    uuid = NEW.uuid
+                )
+            ELSE
+                (SELECT
+                    threads.id
+                FROM
+                    threads
+                INNER JOIN
+                    current_update
+                ON
+                    threads.uuid = current_update.update_uuid
+                )
+            END,
+            -- parent_id
+            CASE WHEN
+                NEW.parent_id IS NOT NULL
+            THEN
+                NEW.parent_id
+            WHEN
+                NEW.parent_uuid IS NOT NULL
+            THEN
+                (SELECT
+                    id
+                FROM
+                    threads
+                WHERE
+                    uuid = NEW.parent_uuid
+                )
+            WHEN
+                NEW.id IS NOT NULL
+            THEN
+                (SELECT
+                    MIN(update_id)
+                FROM
+                    thread_updates
+                WHERE
+                    thread_id = NEW.id
+                )
+            ELSE (
+                SELECT
+                    MIN(thread_updates.update_id)
+                FROM
+                    threads
+                INNER JOIN
+                    thread_updates
+                ON
+                    thread_updates.thread_id = threads.id
+                WHERE
+                    threads.uuid = NEW.uuid
+                )
+            END,
+            -- mtime
+            CASE WHEN
+                NEW.mtime IS NULL
+            THEN
+                ( SELECT mtime FROM current_update )
+            ELSE
+                NEW.mtime
+            END,
+            NEW.author,
+            NEW.email,
+            NEW.title,
+            NEW.comment,
+            NEW.s0,
+            NEW.s1,
+            NEW.s2,
+            NEW.s3,
+            NEW.s4
+        );
+    END;
+
+- sql: |
+    CREATE TRIGGER func_import_new_thread
+    INSTEAD OF INSERT ON func_import_thread_update
+    FOR EACH ROW WHEN
+        (NEW.id IS NULL AND NEW.uuid IS NULL) OR
+        (NEW.uuid IS NOT NULL AND NOT EXISTS (
+            SELECT
+                id
+            FROM
+                threads
+            WHERE
+                uuid = NEW.uuid
+        ))
+    BEGIN
+        INSERT INTO
+            threads(uuid, mtime, ctime, title)
+        VALUES (
+            (SELECT update_uuid FROM current_update),
+            CASE WHEN
+                NEW.mtime IS NULL
+            THEN
+                ( SELECT mtime FROM current_update )
+            ELSE
+                NEW.mtime
+            END,
+            CASE WHEN
+                NEW.mtime IS NULL
+            THEN
+                ( SELECT mtime FROM current_update )
+            ELSE
+                NEW.mtime
+            END,
+            NEW.title
+        );
+    END;
+
+- sql: |
+    CREATE TABLE func_import_project_update(
+        -- thread_updates
+        update_id INTEGER,
+        update_uuid BLOB,
+        id INTEGER, -- threads.thread_id, projects.project_id
+        uuid BLOB, -- thread_uuid -> thread_id, project_uuid -> project_id
+        parent_update_id INTEGER,
+        parent_update_uuid BLOB,
+        mtime VARCHAR, -- we convert timestamps to epochs
+        mtimetz INTEGER,
+        path VARCHAR,
+        author VARCHAR(255),
+        email VARCHAR(255),
+        push_to VARCHAR,
+        lang VARCHAR(8),
+        title VARCHAR(1024),
+        comment text,
+        s0 CHAR(1),
+        s1 CHAR(1),
+        s2 CHAR(1),
+        s3 CHAR(1),
+        s4 CHAR(1),
+        -- project_updates
+        parent_project_id INTEGER, -- projects.parent_id
+        parent_project_uuid BLOB, --  -> projects.parent_id
+        name VARCHAR(40),
+        phase VARCHAR(40),
+        add_kind VARCHAR(40),
+        add_state VARCHAR(40),
+        add_status VARCHAR(40),
+        add_rank INTEGER,
+        add_def INTEGER
+    );
+
+- sql: |
+    CREATE TRIGGER ai_func_import_project_update0
+    AFTER INSERT ON func_import_project_update
+    FOR EACH ROW
+    BEGIN
+        DELETE FROM func_import_project_update;
+
+        select debug(1);
+        INSERT INTO
+            func_import_project_update(
+                -- thread_updates
+                update_id,
+                update_uuid,
+                parent_update_id,
+                parent_update_uuid,
+                id,
+                uuid,
+                mtime,
+                mtimetz,
+                path,
+                author,
+                email,
+                push_to,
+                lang,
+                title,
+                comment,
+                s0,
+                s1,
+                s2,
+                s3,
+                s4,
+                -- project_updates
+                parent_project_id,
+                parent_project_uuid,
+                name,
+                phase,
+                add_kind,
+                add_state,
+                add_status,
+                add_rank,
+                add_def
+            )
+        SELECT
+            -- -- thread_updates
+            -- update_id,
+            CASE WHEN
+                NEW.update_id IS NOT NULL
+            THEN
+                NEW.update_id
+            ELSE
+                nextval('thread_updates')
+            END,
+            -- update_uuid,
+            NULL, -- to be calculated
+            -- parent_update_id, TODO convert into COALESCE from JOIN
+            CASE WHEN
+                NEW.parent_update_id IS NOT NULL
+            THEN
+                NEW.parent_update_id
+            WHEN
+                NEW.parent_update_uuid IS NOT NULL
+            THEN
+                (SELECT
+                    update_id
+                FROM
+                    thread_updates
+                WHERE
+                    update_uuid = NEW.parent_update_uuid
+                )
+            ELSE
+                (SELECT
+                    update_id
+                FROM
+                    thread_updates
+                INNER JOIN
+                    threads
+                ON
+                    threads.uuid = thread_updates.update_uuid
+                WHERE
+                    thread_id = NEW.id
+                )
+            END,
+            -- parent_update_uuid, # retrieve this for hash calculation
+            CASE WHEN
+                NEW.parent_update_uuid IS NOT NULL
+            THEN
+                NEW.parent_update_uuid
+            WHEN
+                NEW.parent_update_id IS NOT NULL
+            THEN
+                (SELECT
+                    update_uuid
+                FROM
+                    thread_updates
+                WHERE
+                    update_id = NEW.parent_update_id
+                )
+            ELSE
+                (SELECT
+                    update_uuid
+                FROM
+                    thread_updates
+                INNER JOIN
+                    threads
+                ON
+                    threads.uuid = thread_updates.update_uuid
+                WHERE
+                    thread_id = NEW.id
+                )
+            END,
+            -- id,
+            CASE WHEN
+                -- sync insert/update
+                NEW.uuid IS NOT NULL
+            THEN
+                (SELECT
+                    id
+                FROM
+                    threads
+                WHERE
+                    uuid = NEW.uuid
+                )
+            WHEN
+                -- local update
+                NEW.id IS NOT NULL
+            THEN
+                NEW.id
+            ELSE
+                nextval('threads')
+            END,
+            -- uuid,
+            CASE WHEN
+                NEW.uuid IS NOT NULL
+            THEN
+                NEW.uuid
+            ELSE
+                (SELECT
+                    uuid
+                FROM
+                    threads
+                WHERE
+                    id = NEW.id
+                )
+            END,
+            -- mtime,
+            CASE WHEN -- not given; default to now
+                NEW.mtime IS NULL
+            THEN
+                strftime('%s','now')
+            WHEN -- given as a unix epoch so keep as is
+                strftime('%s',NEW.mtime,'unixepoch') = NEW.mtime
+            THEN
+                NEW.mtime
+            WHEN -- given as a timestamp string; convert to unix epoch
+                datetime(NEW.mtime) IS NOT NULL
+            THEN
+                strftime('%s', NEW.mtime)
+            ELSE
+                RAISE(ABORT, 'invalid mtime value')
+            END,
+            -- mtimetz,
+            CASE WHEN
+                NEW.mtime IS NULL
+            THEN
+                strftime('%s','now','localtime') - strftime('%s','now')
+            WHEN
+                NEW.mtimetz IS NOT NULL
+            THEN
+                NEW.mtimetz
+            ELSE
+                NULL
+            END,
+            -- path,
+            NULL, -- to be calculated
+            -- author,
+            NEW.author,
+            -- email,
+            NEW.email,
+            -- push_to,
+            NEW.push_to,
+            -- lang,
+            NEW.lang,
+            -- title,
+            NEW.title,
+            -- comment,
+            NEW.comment,
+            -- s0,
+            NULL,
+            -- s1,
+            NULL,
+            -- s2,
+            NULL,
+            -- s3,
+            NULL,
+            -- s4,
+            NULL,
+            -- -- project_updates
+            -- parent_project_id,
+            CASE WHEN
+                NEW.parent_project_id IS NOT NULL
+            THEN
+                NEW.parent_project_id
+            WHEN
+                NEW.parent_project_uuid IS NOT NULL
+            THEN (
+                SELECT
+                    id
+                FROM
+                    threads
+                WHERE
+                    uuid = NEW.parent_project_uuid
+                )
+            END,
+            -- parent_project_uuid,
+            CASE WHEN
+                NEW.parent_project_uuid IS NOT NULL
+            THEN
+                NEW.parent_project_uuid
+            WHEN
+                NEW.parent_project_id IS NOT NULL
+            THEN
+                (SELECT
+                    uuid
+                FROM
+                    threads
+                WHERE
+                    id = NEW.parent_project_id
+                )
+            END,
+            -- name,
+            NEW.name,
+            -- name,
+            -- phase,
+            NEW.phase,
+            -- add_kind,
+            NEW.add_kind,
+            -- add_state,
+            NEW.add_state,
+            -- add_status,
+            NEW.add_status,
+            -- add_rank,
+            NEW.add_rank,
+            -- add_def,
+            NEW.add_def
+        ;
+
+        --select debug(2);
+        ----select debug('select * from func_import_project_update');
+        SELECT
+            CASE WHEN
+                id IS NULL AND uuid IS NOT NULL
+            THEN
+                RAISE(ABORT,'uuid-to-id lookup failed')
+            ELSE
+                1
+            END,
+            CASE WHEN
+                parent_update_id IS NULL AND parent_update_uuid IS NOT NULL
+            THEN
+                RAISE(ABORT,
+                    'parent_update_uuid not found from parent_update_id')
+            ELSE
+                1
+            END,
+            CASE WHEN
+                parent_update_uuid IS NULL AND parent_update_id IS NOT NULL
+            THEN
+                RAISE(ABORT,'parent_update_uuid not found for update')
+            ELSE
+                1
+            END,
+            CASE WHEN
+                parent_project_id IS NULL AND parent_project_uuid IS NOT NULL
+            THEN
+                RAISE(ABORT,'parent_project_uuid not found for update')
+            ELSE
+                1
+            END,
+            CASE WHEN
+                parent_project_id IS NOT NULL AND parent_project_uuid IS NULL
+            THEN
+                RAISE(ABORT,'parent_project_id not found for update')
+            ELSE
+                1
+            END,
+            CASE WHEN
+                mtime IS NOT NULL AND mtimetz IS NULL
+            THEN
+                RAISE(ABORT,'mtimetz must be given if mtime is')
+            ELSE
+                1
+            END
+        FROM
+            func_import_project_update
+        ;
+
+        --select debug(3);
+        UPDATE
+            func_import_project_update
+        SET
+            update_uuid = CAST( sha1(
+                COALESCE(uuid,' '),
+                COALESCE('project',' '),
+                COALESCE(parent_update_uuid,' '),
+                mtime,
+                mtimetz,
+                author,
+                email,
+                COALESCE(title,' '),
+                COALESCE(comment,' '),
+                COALESCE(parent_project_uuid,' '),
+                COALESCE(name,' '),
+                COALESCE(phase,' '),
+                COALESCE(add_kind,' '),
+                COALESCE(add_state, ' '),
+                COALESCE(add_status, ' '),
+                COALESCE(add_rank,' '),
+                COALESCE(add_def,' ')
+            ) AS BLOB)
+        ;
+
+        -- TODO sign and/or check the signature of this update
+
+        --select debug(4);
+        ----select debug('select * from func_import_project_update');
+        INSERT INTO
+            threads(id, uuid, thread_type, mtime, mtimetz, ctime,
+                ctimetz, title)
+        SELECT
+            id,
+            update_uuid,
+            'project',
+            mtime,
+            mtimetz,
+            mtime,
+            mtimetz,
+            title
+        FROM
+            func_import_project_update
+        WHERE
+            parent_update_id IS NULL
+        ;
+
+        --select debug(5);
+
+        --select debug('select * from func_import_project_update');
+        INSERT INTO
+            thread_updates(
+                update_id,
+                update_uuid,
+                thread_id,
+                parent_update_id,
+                mtime,
+                mtimetz,
+                author,
+                email,
+                title,
+                comment,
+                push_to,
+                slots
+            )
+        SELECT
+            update_id,
+            update_uuid,
+            id,
+            parent_update_id,
+            mtime,
+            mtimetz,
+            author,
+            email,
+            title,
+            comment,
+            push_to,
+            SUBSTR(LOWER(HEX(update_uuid)),1,5)
+        FROM
+            func_import_project_update
+        ;
+
+        INSERT INTO
+            project_states(project_id,kind,state,status,rank,def)
+        SELECT
+            id,
+            add_kind,
+            add_state,
+            add_status,
+            add_rank,
+            add_def
+        FROM
+            func_import_project_update
+        WHERE
+            add_kind IS NOT NULL
+        ;
+
+        INSERT INTO
+            projects(id, name, parent_id, phase_id)
+        SELECT
+            func_import_project_update.id,
+            func_import_project_update.name,
+            func_import_project_update.parent_project_id,
+            project_states.id
+        FROM
+            func_import_project_update
+        INNER JOIN
+            project_states
+        ON
+            project_states.project_id = func_import_project_update.id AND
+            project_states.kind = func_import_project_update.add_kind AND
+            project_states.state = func_import_project_update.phase
+        LEFT JOIN
+            projects
+        ON
+            projects.id = func_import_project_update.id
+        WHERE
+            projects.id IS NULL
+        ;
+
+        INSERT INTO
+            project_updates(
+                update_id,
+                project_id,
+                parent_id,
+                name,
+                phase_id,
+                add_kind,
+                add_state,
+                add_status,
+                add_rank,
+                add_def
+            )
+        SELECT
+            update_id,
+            func_import_project_update.id,
+            parent_project_id,
+            name,
+            project_states.id,
+            add_kind,
+            add_state,
+            add_status,
+            add_rank,
+            add_def
+        FROM
+            func_import_project_update
+        LEFT JOIN
+            project_states
+        ON
+            project_states.project_id = func_import_project_update.id AND
+            project_states.kind = 'phase' AND
+            project_states.state = func_import_project_update.phase
+        ;
+
+        --select debug(8);
+        INSERT INTO
+            func_update_project_tree_prefix(project_id,s0,s1,s2,s3,s4)
+        SELECT
+            projects_tree.parent,
+            func_import_project_update.s0,
+            func_import_project_update.s1,
+            func_import_project_update.s2,
+            func_import_project_update.s3,
+            func_import_project_update.s4
+        FROM
+            func_import_project_update
+        INNER JOIN
+            projects_tree
+        ON
+            projects_tree.child = func_import_project_update.id
+        ;
+
+        --select debug(9);
+        DELETE FROM func_import_project_update;
+    END;
+
+- sql: |
+    CREATE TRIGGER au_func_import_project_update
+    AFTER UPDATE OF update_uuid ON func_import_project_update
+    FOR EACH ROW
+    BEGIN
+        UPDATE func_import_project_update
+        SET
+            s0 = substr(lower(hex(NEW.update_uuid)),1,1),
+            s1 = substr(lower(hex(NEW.update_uuid)),2,1),
+            s2 = substr(lower(hex(NEW.update_uuid)),3,1),
+            s3 = substr(lower(hex(NEW.update_uuid)),4,1),
+            s4 = substr(lower(hex(NEW.update_uuid)),5,1)
+        ;
+    END;
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+        VALUES('phase','active','define',10);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+        VALUES('phase','active','plan',20);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank,def)
+        VALUES('phase','active','run',30,1);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+        VALUES('phase','resolved','eval',40);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+        VALUES('phase','closed','closed',50);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank,def)
+    VALUES('task','active','open',10,1);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('task','active','assigned',20);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('task','stalled','needinfo',30);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('task','stalled','upstream',40);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('task','stalled','depends',50);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('task','resolved','done',60);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('task','closed','cancel',70);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank,def)
+    VALUES('issue','active','open',10, 1);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','active','assigned',20);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','stalled','needinfo',30);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','stalled','upstream',40);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','stalled','depends',50);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','resolved','workaround',60);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','resolved','solved',70);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','closed','duplicate',80);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','closed','noissue',100);
+
+- sql: |
+    INSERT INTO project_defaults(kind,status,state,rank)
+    VALUES('issue','closed','norepeat',110);
+
+#- sql: |
+#    INSERT INTO project_defaults(kind,status,state,rank,def)
+#        VALUES('issue','active','open',10, 1);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('active','assigned',20);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('stalled','needinfo',30);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('stalled','upstream',40);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('stalled','depends',50);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('resolved','testing',60);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('resolved','fixed',70);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('closed','duplicate',80);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('closed','wontfix',90);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('closed','noissue',100);
+#
+#- sql: |
+#    INSERT INTO issue_default_states(status,state,rank)
+#    VALUES('closed','norepeat',110);
+#
